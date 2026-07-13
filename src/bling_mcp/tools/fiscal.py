@@ -1,0 +1,263 @@
+"""Fiscal (NF-e/NFC-e/NFS-e, naturezas de operação) endpoints for the Bling v3 API.
+
+Covers the SDK source modules: nfes, nfces, nfses, naturezasDeOperacoes (see
+AlexandreBellas/bling-erp-api-js). The Bling endpoint base for the ``nfes``
+module is literally ``nfe`` (singular).
+"""
+
+from .spec import Endpoint, Param
+
+ENDPOINTS = (
+    # --- nfes (notas fiscais eletrônicas) -------------------------------------
+    Endpoint(
+        "list_nfe",
+        "GET",
+        "nfe",
+        "List NF-e invoices",
+        query_params=(
+            Param("pagina", int),
+            Param("limite", int),
+            Param("numeroLoja", str),
+            Param("situacao", int),
+            Param("tipo", int),
+            Param("dataEmissaoInicial", str),
+            Param("dataEmissaoFinal", str),
+        ),
+    ),
+    Endpoint(
+        "get_nfe",
+        "GET",
+        "nfe/{idNotaFiscal}",
+        "Get an NF-e invoice",
+        path_params=(Param("idNotaFiscal", int),),
+    ),
+    Endpoint(
+        "create_nfe",
+        "POST",
+        "nfe",
+        "Create an NF-e invoice",
+        has_body=True,
+    ),
+    Endpoint(
+        "update_nfe",
+        "PUT",
+        "nfe/{idNotaFiscal}",
+        "Replace an NF-e invoice",
+        path_params=(Param("idNotaFiscal", int),),
+        has_body=True,
+    ),
+    Endpoint(
+        "delete_nfe",
+        "DELETE",
+        "nfe",
+        "Delete multiple NF-e invoices",
+        query_params=(Param("idsNotas", list),),
+    ),
+    Endpoint(
+        "send_nfe",
+        "POST",
+        "nfe/{idNotaFiscal}/enviar",
+        "Send (authorize) an NF-e invoice",
+        path_params=(Param("idNotaFiscal", int),),
+    ),
+    Endpoint(
+        "post_accounts_nfe",
+        "POST",
+        "nfe/{idNotaFiscal}/lancar-contas",
+        "Post accounts receivable/payable for an NF-e invoice",
+        path_params=(Param("idNotaFiscal", int),),
+    ),
+    Endpoint(
+        "reverse_accounts_nfe",
+        "POST",
+        "nfe/{idNotaFiscal}/estornar-contas",
+        "Reverse posted accounts for an NF-e invoice",
+        path_params=(Param("idNotaFiscal", int),),
+    ),
+    Endpoint(
+        "post_stock_nfe",
+        "POST",
+        "nfe/{idNotaFiscal}/lancar-estoque",
+        "Post stock for an NF-e invoice to the default deposit",
+        path_params=(Param("idNotaFiscal", int),),
+    ),
+    Endpoint(
+        "post_stock_to_deposit_nfe",
+        "POST",
+        "nfe/{idNotaFiscal}/lancar-estoque/{idDeposito}",
+        "Post stock for an NF-e invoice to a specific deposit",
+        path_params=(Param("idNotaFiscal", int), Param("idDeposito", int)),
+    ),
+    Endpoint(
+        "reverse_stock_nfe",
+        "POST",
+        "nfe/{idNotaFiscal}/estornar-estoque",
+        "Reverse posted stock for an NF-e invoice",
+        path_params=(Param("idNotaFiscal", int),),
+    ),
+    # --- nfces (notas fiscais de consumidor eletrônicas) ----------------------
+    Endpoint(
+        "list_nfce",
+        "GET",
+        "nfce",
+        "List NFC-e invoices",
+        query_params=(
+            Param("pagina", int),
+            Param("limite", int),
+            Param("situacao", int),
+            Param("dataEmissaoInicial", str),
+            Param("dataEmissaoFinal", str),
+        ),
+    ),
+    Endpoint(
+        "get_nfce",
+        "GET",
+        "nfce/{idNotaFiscalConsumidor}",
+        "Get an NFC-e invoice",
+        path_params=(Param("idNotaFiscalConsumidor", int),),
+    ),
+    Endpoint(
+        "create_nfce",
+        "POST",
+        "nfce",
+        "Create an NFC-e invoice",
+        has_body=True,
+    ),
+    Endpoint(
+        "update_nfce",
+        "PUT",
+        "nfce/{idNotaFiscalConsumidor}",
+        "Replace an NFC-e invoice",
+        path_params=(Param("idNotaFiscalConsumidor", int),),
+        has_body=True,
+    ),
+    Endpoint(
+        "send_nfce",
+        "POST",
+        "nfce/{idNotaFiscalConsumidor}/enviar",
+        "Send (authorize) an NFC-e invoice",
+        path_params=(Param("idNotaFiscalConsumidor", int),),
+    ),
+    Endpoint(
+        "post_accounts_nfce",
+        "POST",
+        "nfce/{idNotaFiscalConsumidor}/lancar-contas",
+        "Post accounts receivable/payable for an NFC-e invoice",
+        path_params=(Param("idNotaFiscalConsumidor", int),),
+    ),
+    Endpoint(
+        "reverse_accounts_nfce",
+        "POST",
+        "nfce/{idNotaFiscalConsumidor}/estornar-contas",
+        "Reverse posted accounts for an NFC-e invoice",
+        path_params=(Param("idNotaFiscalConsumidor", int),),
+    ),
+    Endpoint(
+        "post_stock_nfce",
+        "POST",
+        "nfce/{idNotaFiscalConsumidor}/lancar-estoque",
+        "Post stock for an NFC-e invoice to the default deposit",
+        path_params=(Param("idNotaFiscalConsumidor", int),),
+    ),
+    Endpoint(
+        "post_stock_to_deposit_nfce",
+        "POST",
+        "nfce/{idNotaFiscalConsumidor}/lancar-estoque/{idDeposito}",
+        "Post stock for an NFC-e invoice to a specific deposit",
+        path_params=(
+            Param("idNotaFiscalConsumidor", int),
+            Param("idDeposito", int),
+        ),
+    ),
+    Endpoint(
+        "reverse_stock_nfce",
+        "POST",
+        "nfce/{idNotaFiscalConsumidor}/estornar-estoque",
+        "Reverse posted stock for an NFC-e invoice",
+        path_params=(Param("idNotaFiscalConsumidor", int),),
+    ),
+    # --- nfses (notas fiscais de serviço eletrônicas) -------------------------
+    Endpoint(
+        "list_nfse",
+        "GET",
+        "nfse",
+        "List NFS-e service invoices",
+        query_params=(
+            Param("pagina", int),
+            Param("limite", int),
+            Param("situacao", int),
+            Param("dataEmissaoInicial", str),
+            Param("dataEmissaoFinal", str),
+        ),
+    ),
+    Endpoint(
+        "get_nfse",
+        "GET",
+        "nfse/{idNotaServico}",
+        "Get an NFS-e service invoice",
+        path_params=(Param("idNotaServico", int),),
+    ),
+    Endpoint(
+        "create_nfse",
+        "POST",
+        "nfse",
+        "Create an NFS-e service invoice",
+        has_body=True,
+    ),
+    Endpoint(
+        "delete_nfse",
+        "DELETE",
+        "nfse/{idNotaServico}",
+        "Delete an NFS-e service invoice",
+        path_params=(Param("idNotaServico", int),),
+    ),
+    Endpoint(
+        "send_nfse",
+        "POST",
+        "nfse/{idNotaServico}/enviar",
+        "Send (authorize) an NFS-e service invoice",
+        path_params=(Param("idNotaServico", int),),
+    ),
+    Endpoint(
+        "cancel_nfse",
+        "POST",
+        "nfse/{idNotaServico}/cancelar",
+        "Cancel an NFS-e service invoice",
+        path_params=(Param("idNotaServico", int),),
+        has_body=True,
+    ),
+    Endpoint(
+        "get_nfse_configurations",
+        "GET",
+        "nfse/configuracoes",
+        "Get NFS-e issuance configurations",
+    ),
+    Endpoint(
+        "update_nfse_configurations",
+        "PUT",
+        "nfse/configuracoes",
+        "Replace NFS-e issuance configurations",
+        has_body=True,
+    ),
+    # --- naturezas de operações ------------------------------------------------
+    Endpoint(
+        "list_naturezas_operacoes",
+        "GET",
+        "naturezas-operacoes",
+        "List operation nature (natureza de operação) records",
+        query_params=(
+            Param("pagina", int),
+            Param("limite", int),
+            Param("situacao", int),
+            Param("descricao", str),
+        ),
+    ),
+    Endpoint(
+        "obtain_tax_natureza_operacao",
+        "POST",
+        "naturezas-operacoes/{idNaturezaOperacao}/obter-tributacao",
+        "Obtain tax rules for an operation nature",
+        path_params=(Param("idNaturezaOperacao", int),),
+        has_body=True,
+    ),
+)

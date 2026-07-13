@@ -1,48 +1,71 @@
-"""Smoke tests: the server registers exactly the expected tool surface."""
+"""Smoke tests: the server registers the full endpoint surface via the factory."""
 
-from bling_mcp.server import create_server
-from bling_mcp.tools import BlingTools
+from bling_mcp.server import create_server, enabled_endpoints
+from bling_mcp.tools.registry import ALL_ENDPOINTS, MODULES
 
-EXPECTED_TOOLS = {
-    "bling_list_accounts",
-    "bling_list_pedidos_vendas",
-    "bling_get_pedido_venda",
-    "bling_list_produtos",
-    "bling_get_produto",
-    "bling_list_contatos",
-    "bling_get_contato",
-    "bling_list_contas_pagar",
-    "bling_list_contas_receber",
-    "bling_list_nfe",
-    "bling_get_nfe",
-    "bling_list_estoque_saldos",
-    "bling_list_categorias_produtos",
-    "bling_list_formas_pagamento",
-    "bling_list_depositos",
-    "bling_list_vendedores",
-}
+
+class _Cfg:
+    account_label = "default"
+    modules = None
+    api_base_url = "https://api.test/v3"
 
 
 class FakeClient:
     def get(self, path, params=None):
         return {}
 
+    def post(self, path, json=None, params=None):
+        return {}
 
-def _server():
-    return create_server(BlingTools(FakeClient(), account_label="default"))
+    def put(self, path, json=None, params=None):
+        return {}
+
+    def patch(self, path, json=None, params=None):
+        return {}
+
+    def delete(self, path, params=None):
+        return None
 
 
-def test_server_registers_exactly_the_expected_tools():
+def _server(config=None):
+    return create_server(FakeClient(), config or _Cfg())
+
+
+def test_registers_all_endpoints_plus_meta():
     names = {t.name for t in _server()._tool_manager.list_tools()}
-    assert names == EXPECTED_TOOLS
+    assert "bling_list_accounts" in names
+    assert len(names) == len(ALL_ENDPOINTS) + 1
 
 
-def test_server_exposes_sixteen_bling_prefixed_tools():
+def test_all_tools_are_bling_prefixed():
     names = [t.name for t in _server()._tool_manager.list_tools()]
-    assert len(names) == 16
     assert all(n.startswith("bling_") for n in names)
 
 
 def test_each_tool_has_a_description():
     for tool in _server()._tool_manager.list_tools():
         assert tool.description, f"{tool.name} is missing a description"
+
+
+def test_legacy_tools_still_present():
+    names = {t.name for t in _server()._tool_manager.list_tools()}
+    for legacy in (
+        "bling_list_produtos",
+        "bling_get_produto",
+        "bling_list_pedidos_vendas",
+        "bling_get_pedido_venda",
+        "bling_list_contatos",
+    ):
+        assert legacy in names, legacy
+
+
+def test_module_filter_reduces_surface():
+    class C(_Cfg):
+        modules = ("produtos",)
+
+    names = {t.name for t in _server(C())._tool_manager.list_tools()}
+    assert len(names) == len(MODULES["produtos"]) + 1
+
+
+def test_enabled_endpoints_defaults_to_all():
+    assert enabled_endpoints(_Cfg()) == ALL_ENDPOINTS

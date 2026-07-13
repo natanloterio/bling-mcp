@@ -1,8 +1,7 @@
-"""Bling tool layer: declarative endpoint specs + factory + registry.
+"""Bling tool layer: declarative endpoint specs, factory, and registry.
 
-During the migration to full API coverage, the legacy ``BlingTools`` class is
-re-exported so existing imports keep working. It is removed once the registry
-covers every endpoint.
+- ``spec`` — the immutable :class:`~bling_mcp.tools.spec.Endpoint`/``Param`` data.
+- ``factory`` — turns an ``Endpoint`` into a typed MCP tool.
+- ``registry`` — aggregates every domain module into ``ALL_ENDPOINTS``.
+- domain modules (``produtos``, ``pedidos``, …) — the endpoint catalogs.
 """
-
-from .legacy import BlingTools  # noqa: F401  (removed in cleanup task)
