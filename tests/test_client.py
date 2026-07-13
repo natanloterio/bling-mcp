@@ -92,3 +92,44 @@ def test_get_raises_bling_api_error_on_non_2xx():
         client.get("produtos/999")
 
     assert exc.value.status_code == 404
+
+
+def test_post_sends_json_body_and_content_type():
+    http, reqs = build_client([{"status": 201, "json": {"data": {"id": 9}}}])
+    client = BlingClient(make_config(), FakeTokens(), http)
+
+    out = client.post("produtos", json={"nome": "X"})
+
+    assert reqs[0].method == "POST"
+    assert str(reqs[0].url) == "https://api.test/v3/produtos"
+    assert "application/json" in reqs[0].headers["content-type"]
+    assert b'"nome"' in reqs[0].content
+    assert out == {"data": {"id": 9}}
+
+
+def test_delete_204_returns_none():
+    http, reqs = build_client([{"status": 204}])
+    client = BlingClient(make_config(), FakeTokens(), http)
+
+    assert client.delete("produtos/5") is None
+    assert reqs[0].method == "DELETE"
+
+
+def test_put_and_patch_use_correct_verb():
+    http, reqs = build_client([{"json": {}}, {"json": {}}])
+    client = BlingClient(make_config(), FakeTokens(), http)
+
+    client.put("logisticas/1", json={"a": 1})
+    client.patch("produtos/1", json={"b": 2})
+
+    assert [r.method for r in reqs] == ["PUT", "PATCH"]
+
+
+def test_write_error_raises_bling_api_error():
+    http, _ = build_client([{"status": 422, "json": {"error": "bad"}}])
+    client = BlingClient(make_config(), FakeTokens(), http)
+
+    with pytest.raises(BlingApiError) as exc:
+        client.post("produtos", json={})
+
+    assert exc.value.status_code == 422

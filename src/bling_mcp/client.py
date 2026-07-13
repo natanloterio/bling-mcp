@@ -47,14 +47,27 @@ class BlingClient:
         self._tokens = token_manager
         self._http = http_client
 
-    def get(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
-        """GET a Bling endpoint and return the parsed JSON body."""
+    def _request(
+        self,
+        method: str,
+        path: str,
+        params: Mapping[str, Any] | None = None,
+        json: Any = None,
+    ) -> Any:
+        """Send a request to a Bling endpoint and return the parsed JSON body.
+
+        A body is sent (with ``Content-Type: application/json``) only when
+        ``json`` is not ``None``; ``204 No Content`` and empty bodies return
+        ``None``.
+        """
         url = f"{self._config.api_base_url}/{path.lstrip('/')}"
         token = self._tokens.get_access_token()
         try:
-            response = self._http.get(
+            response = self._http.request(
+                method,
                 url,
                 params=_clean_params(params),
+                json=json,
                 headers={
                     "Authorization": f"Bearer {token}",
                     "Accept": "application/json",
@@ -69,7 +82,46 @@ class BlingClient:
                 f"Bling API error on {path}: HTTP {response.status_code} {response.text}",
                 payload=_safe_json(response),
             )
+        if response.status_code == 204 or not response.content:
+            return None
         return response.json()
+
+    def get(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
+        """GET a Bling endpoint and return the parsed JSON body."""
+        return self._request("GET", path, params=params)
+
+    def post(
+        self,
+        path: str,
+        json: Any = None,
+        params: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """POST a JSON body to a Bling endpoint (create)."""
+        return self._request("POST", path, params=params, json=json)
+
+    def put(
+        self,
+        path: str,
+        json: Any = None,
+        params: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """PUT a JSON body to a Bling endpoint (full replace)."""
+        return self._request("PUT", path, params=params, json=json)
+
+    def patch(
+        self,
+        path: str,
+        json: Any = None,
+        params: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """PATCH a JSON body to a Bling endpoint (partial update)."""
+        return self._request("PATCH", path, params=params, json=json)
+
+    def delete(
+        self, path: str, params: Mapping[str, Any] | None = None
+    ) -> Any:
+        """DELETE a Bling endpoint."""
+        return self._request("DELETE", path, params=params)
 
 
 def _safe_json(response: httpx.Response) -> Any:

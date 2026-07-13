@@ -33,6 +33,7 @@ class BlingConfig:
     api_base_url: str = DEFAULT_API_BASE_URL
     token_url: str = DEFAULT_TOKEN_URL
     account_label: str = DEFAULT_ACCOUNT_LABEL
+    modules: tuple[str, ...] | None = None
 
 
 def load_config(env: Mapping[str, str]) -> BlingConfig:
@@ -51,6 +52,8 @@ def load_config(env: Mapping[str, str]) -> BlingConfig:
     base_url = (env.get("BLING_API_BASE_URL") or DEFAULT_API_BASE_URL).strip()
     token_url = (env.get("BLING_TOKEN_URL") or DEFAULT_TOKEN_URL).strip()
     label = (env.get("BLING_ACCOUNT_LABEL") or DEFAULT_ACCOUNT_LABEL).strip()
+    raw_modules = (env.get("BLING_MODULES") or "").strip()
+    modules = tuple(m.strip() for m in raw_modules.split(",") if m.strip()) or None
 
     return BlingConfig(
         client_id=env["BLING_CLIENT_ID"].strip(),
@@ -59,4 +62,5 @@ def load_config(env: Mapping[str, str]) -> BlingConfig:
         api_base_url=base_url.rstrip("/"),
         token_url=token_url,
         account_label=label,
+        modules=modules,
     )

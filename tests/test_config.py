@@ -4,6 +4,25 @@ import pytest
 
 from bling_mcp.config import BlingConfig, ConfigError, load_config
 
+
+def _base_env(**extra):
+    env = {
+        "BLING_CLIENT_ID": "a",
+        "BLING_CLIENT_SECRET": "b",
+        "BLING_REFRESH_TOKEN": "c",
+    }
+    env.update(extra)
+    return env
+
+
+def test_modules_none_when_unset():
+    assert load_config(_base_env()).modules is None
+
+
+def test_modules_parsed_and_trimmed():
+    cfg = load_config(_base_env(BLING_MODULES=" produtos , pedidos "))
+    assert cfg.modules == ("produtos", "pedidos")
+
 VALID_ENV = {
     "BLING_CLIENT_ID": "abc",
     "BLING_CLIENT_SECRET": "secret",
