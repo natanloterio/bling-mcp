@@ -55,7 +55,20 @@ design → implement → test progress until the MCP is functional, then stops.
 - [x] `setup-windows.bat` — double-click launcher (ExecutionPolicy Bypass)
 - [x] Verified the script's Python dependencies on Linux: `authorize url` CLI + the embedded stdio smoke (prints 16). PowerShell itself unrunnable here (no pwsh) — written to PS 5.1 spec and reviewed.
 
+### Iteration 5 — full API coverage: CRUD + all modules ✅ (80 tests green, 93% coverage)
+- [x] **Scope change:** from 16 read-only tools → **218 tools** (217 endpoints 1:1 with Bling v3 + meta). Full CRUD (GET/POST/PUT/PATCH/DELETE) + special actions. Writes enabled, no gate (per user decision).
+- [x] `client.py` — added write verbs `post/put/patch/delete` via a shared `_request`; 204/empty body → `None`; `Content-Type: application/json` only when a body is sent.
+- [x] **Declarative architecture** — `tools/spec.py` (`Endpoint`/`Param`, frozen), `tools/factory.py` (`build_tool` builds a typed MCP tool per spec via dynamic `__signature__`; validated by a FastMCP spike), `tools/registry.py` (aggregates 10 domain modules → `ALL_ENDPOINTS`, `MODULES`).
+- [x] **10 domain modules** extracted from the authoritative SDK `AlexandreBellas/bling-erp-api-js` (`src/entities/<mod>/index.ts`), fanned out across **7 parallel subagents**: produtos 38, pedidos 31, contatos 11, financeiro 25, fiscal 31, estoque 8, logistica 20, producao 7, situacoes 12, cadastros 34 = **217**.
+- [x] `config.py` — optional `BLING_MODULES` filter (comma-separated domains; default = all).
+- [x] `server.py` — registers one `bling_<name>` tool per enabled endpoint via the factory; legacy 16 tool names preserved.
+- [x] **Validation tests** (`test_registry.py`) guard the 217 specs: unique names, path placeholders == path_params, snake_case, legacy-name preservation, scale ≥200. Smoke: server registers exactly 218 tools with correct typed schemas.
+- [x] Removed legacy `BlingTools`; docs updated (README domain table + write warning + `BLING_MODULES`, `.env.example`).
+
+**Extraction recipe (reusable):** SDK `this.repository.index/show/store/update/replace/destroy` → `GET-list/GET-one/POST/PUT/PATCH/DELETE`; exact path from the literal `endpoint:` string, confirmed by the JSDoc `@see .../referencia#/<Mod>/<operationId>` fragment (`_`=`/`, `__name_`=`/{name}`, prefix = verb).
+
 ### Remaining polish (optional — run `/loop ...` again to resume)
 - [ ] Sample `manifests/claude_desktop_config.json` committed to the repo
 - [ ] 401 → force-refresh-and-retry-once in `BlingClient`
+- [ ] `x-bling-homologacao` header support for the `homologacao` module (needs per-endpoint header spec)
 - [ ] Publish to PyPI so install collapses to `uvx bling-mcp`
