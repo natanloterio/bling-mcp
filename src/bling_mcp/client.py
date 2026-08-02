@@ -37,7 +37,7 @@ def _clean_params(params: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 class BlingClient:
-    """Read-only client for Bling v3 GET endpoints."""
+    """Client for the Bling v3 API with automatic retry on 401."""
 
     def __init__(
         self,
