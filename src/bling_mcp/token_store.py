@@ -103,6 +103,9 @@ class JsonFileTokenStore:
             return None
 
         accounts = document.get("accounts")
+        if accounts is not None and not isinstance(accounts, dict):
+            self._warn(f"ignoring malformed accounts in {self.path}: expected dict, got {type(accounts).__name__}")
+            return None
         entry = accounts.get(client_id) if isinstance(accounts, dict) else None
         if entry is None:
             return None  # no entry for this client is normal, not a problem
@@ -124,7 +127,11 @@ class JsonFileTokenStore:
     def save(self, client_id: str, tokens: StoredTokens) -> None:
         document = self._read_document() or {}
         accounts = document.get("accounts")
-        accounts = accounts if isinstance(accounts, dict) else {}
+        if accounts is not None and not isinstance(accounts, dict):
+            self._warn(f"ignoring malformed accounts in {self.path}: expected dict, got {type(accounts).__name__}")
+            accounts = {}
+        else:
+            accounts = accounts if isinstance(accounts, dict) else {}
 
         self._write_document(
             {
@@ -147,7 +154,7 @@ class JsonFileTokenStore:
             raw = self.path.read_text(encoding="utf-8")
         except FileNotFoundError:
             return None
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             self._warn(f"could not read token store {self.path}: {exc}")
             return None
 

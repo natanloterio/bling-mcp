@@ -4,7 +4,11 @@ Every filesystem test uses tmp_path; nothing here touches the real user state
 directory or the network.
 """
 
+import json
+import os
 from pathlib import Path
+
+import pytest
 
 from bling_mcp.token_store import (
     JsonFileTokenStore,
@@ -82,12 +86,6 @@ def test_null_store_save_is_a_noop():
     store = NullTokenStore()
     store.save("client-1", StoredTokens(refresh_token="r1", seed_fingerprint="fp"))
     assert store.load("client-1") is None
-
-
-import json
-import os
-
-import pytest
 
 
 def make_tokens(**over):
@@ -214,3 +212,48 @@ def test_saved_file_is_owner_readable_only(tmp_path):
     JsonFileTokenStore(path).save("client-1", make_tokens())
 
     assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_load_warns_and_does_not_raise_on_invalid_utf8(tmp_path, capsys):
+    path = tmp_path / "token.json"
+    path.write_bytes(b'\xff\xfe\x00\x01 not valid utf8 \x80\x81')
+    store = JsonFileTokenStore(path)
+
+    assert store.load("client-1") is None
+    assert "token store" in capsys.readouterr().err
+
+
+def test_save_warns_and_does_not_raise_on_invalid_utf8(tmp_path, capsys):
+    path = tmp_path / "token.json"
+    path.write_bytes(b'\xff\xfe\x00\x01 not valid utf8 \x80\x81')
+    store = JsonFileTokenStore(path)
+
+    store.save("client-1", make_tokens())  # must not raise
+
+    assert "token store" in capsys.readouterr().err
+
+
+def test_load_warns_and_returns_none_on_non_dict_accounts(tmp_path, capsys):
+    path = tmp_path / "token.json"
+    path.write_text(
+        json.dumps({"version": 1, "accounts": "not a dict"}),
+        encoding="utf-8",
+    )
+    store = JsonFileTokenStore(path)
+
+    assert store.load("client-1") is None
+    assert "token store" in capsys.readouterr().err
+
+
+def test_save_warns_and_continues_on_non_dict_accounts(tmp_path, capsys):
+    path = tmp_path / "token.json"
+    path.write_text(
+        json.dumps({"version": 1, "accounts": "not a dict"}),
+        encoding="utf-8",
+    )
+    store = JsonFileTokenStore(path)
+
+    store.save("client-1", make_tokens())
+
+    assert "token store" in capsys.readouterr().err
+    assert store.load("client-1") == make_tokens()
