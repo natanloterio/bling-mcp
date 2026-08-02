@@ -21,12 +21,19 @@ def make_config(**over):
 
 
 class FakeTokens:
-    def __init__(self, token="TOK"):
+    def __init__(self, token="TOK", refreshed="TOK2"):
         self.token = token
+        self.refreshed = refreshed
         self.calls = 0
+        self.forced = 0
 
     def get_access_token(self):
         self.calls += 1
+        return self.token
+
+    def force_refresh(self):
+        self.forced += 1
+        self.token = self.refreshed
         return self.token
 
 
@@ -133,3 +140,70 @@ def test_write_error_raises_bling_api_error():
         client.post("produtos", json={})
 
     assert exc.value.status_code == 422
+
+
+def test_401_forces_a_refresh_and_retries_once():
+    http, reqs = build_client([{"status": 401, "json": {}}, {"json": {"data": [1]}}])
+    tokens = FakeTokens("STALE", refreshed="FRESH")
+    client = BlingClient(make_config(), tokens, http)
+
+    assert client.get("produtos") == {"data": [1]}
+    assert tokens.forced == 1
+    assert len(reqs) == 2
+    assert reqs[0].headers["Authorization"] == "Bearer STALE"
+    assert reqs[1].headers["Authorization"] == "Bearer FRESH"
+
+
+def test_second_401_raises_bling_api_error():
+    http, reqs = build_client([{"status": 401, "json": {"error": "unauthorized"}}])
+    tokens = FakeTokens()
+    client = BlingClient(make_config(), tokens, http)
+
+    with pytest.raises(BlingApiError) as exc:
+        client.get("produtos")
+
+    assert exc.value.status_code == 401
+    assert tokens.forced == 1  # retried exactly once, not in a loop
+    assert len(reqs) == 2
+
+
+def test_successful_request_never_forces_a_refresh():
+    http, _ = build_client([{"json": {}}])
+    tokens = FakeTokens()
+    client = BlingClient(make_config(), tokens, http)
+
+    client.get("produtos")
+
+    assert tokens.forced == 0
+
+
+def test_403_and_500_do_not_retry():
+    for status in (403, 500):
+        http, reqs = build_client([{"status": status, "json": {}}])
+        tokens = FakeTokens()
+        client = BlingClient(make_config(), tokens, http)
+
+        with pytest.raises(BlingApiError):
+            client.get("produtos")
+
+        assert tokens.forced == 0
+        assert len(reqs) == 1
+
+
+def test_retry_replays_method_body_and_params():
+    http, reqs = build_client([{"status": 401, "json": {}}, {"status": 201, "json": {}}])
+    client = BlingClient(make_config(), FakeTokens(), http)
+
+    client.post("produtos", json={"nome": "X"}, params={"loja": 7})
+
+    assert [r.method for r in reqs] == ["POST", "POST"]
+    assert b'"nome"' in reqs[1].content
+    assert reqs[1].url.params.get("loja") == "7"
+
+
+def test_retry_applies_to_delete_too():
+    http, reqs = build_client([{"status": 401, "json": {}}, {"status": 204}])
+    client = BlingClient(make_config(), FakeTokens(), http)
+
+    assert client.delete("produtos/5") is None
+    assert [r.method for r in reqs] == ["DELETE", "DELETE"]

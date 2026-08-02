@@ -1,8 +1,8 @@
-"""Thin read-only HTTP client for the Bling v3 API.
+"""Thin HTTP client for the Bling v3 API.
 
-Wraps GET requests with bearer authentication (via the token manager), URL
-joining, query-param cleaning, and error mapping. The httpx client is injected
-so the wrapper is testable without network access.
+Wraps every verb with bearer authentication (via the token manager), URL
+joining, query-param cleaning, error mapping, and a single retry on 401. The
+httpx client is injected so the wrapper is testable without network access.
 """
 
 from __future__ import annotations
@@ -16,6 +16,8 @@ from .config import BlingConfig
 
 class _Tokens(Protocol):
     def get_access_token(self) -> str: ...
+
+    def force_refresh(self) -> str: ...
 
 
 class BlingApiError(RuntimeError):
@@ -58,21 +60,31 @@ class BlingClient:
 
         A body is sent (with ``Content-Type: application/json``) only when
         ``json`` is not ``None``; ``204 No Content`` and empty bodies return
-        ``None``.
+        ``None``. Retries once on 401 after forcing a token refresh.
         """
         url = f"{self._config.api_base_url}/{path.lstrip('/')}"
-        token = self._tokens.get_access_token()
-        try:
-            response = self._http.request(
+        cleaned = _clean_params(params)
+
+        def send(token: str) -> httpx.Response:
+            return self._http.request(
                 method,
                 url,
-                params=_clean_params(params),
+                params=cleaned,
                 json=json,
                 headers={
                     "Authorization": f"Bearer {token}",
                     "Accept": "application/json",
                 },
             )
+
+        try:
+            response = send(self._tokens.get_access_token())
+            if response.status_code == 401:
+                # A 401 means the token was rejected before the request was
+                # processed, so replaying it is safe even for POST and DELETE.
+                # Exactly one retry: a second 401 is a real authorization
+                # failure, not a stale token.
+                response = send(self._tokens.force_refresh())
         except httpx.HTTPError as exc:
             raise BlingApiError(0, f"Request to {path} failed: {exc}") from exc
 
