@@ -5,8 +5,13 @@ long-lived refresh token. The refresh token may rotate on each refresh, so the
 manager tracks its own current refresh token rather than mutating the
 (immutable) config.
 
-The HTTP client and clock are injected to keep the refresh flow testable without
-network access or real time.
+The HTTP client, clock and token store are injected to keep the refresh flow
+testable without network access, real time, or the filesystem.
+
+The clock is wall-clock (``time.time``) rather than ``time.monotonic`` because
+the expiry is persisted and has to remain meaningful across process restarts.
+The cost is sensitivity to clock adjustments; the 60s margin absorbs small
+jumps and the client's 401 retry covers the rest.
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ from typing import Callable
 import httpx
 
 from .config import BlingConfig
+from .token_store import NullTokenStore, StoredTokens, TokenStore, fingerprint
 
 # Refresh this many seconds before the token actually expires, to avoid using a
 # token that lapses mid-request.
@@ -35,16 +41,20 @@ class TokenManager:
         self,
         config: BlingConfig,
         http_client: httpx.Client,
-        clock: Callable[[], float] = time.monotonic,
+        clock: Callable[[], float] = time.time,
         expiry_margin: int = DEFAULT_EXPIRY_MARGIN_SECONDS,
+        store: TokenStore | None = None,
     ) -> None:
         self._config = config
         self._http = http_client
         self._clock = clock
         self._margin = expiry_margin
+        self._store = store if store is not None else NullTokenStore()
+        self._seed_fingerprint = fingerprint(config.refresh_token)
         self._refresh_token = config.refresh_token
         self._access_token: str | None = None
         self._expires_at = 0.0
+        self._adopt(self._store.load(config.client_id))
 
     def get_access_token(self) -> str:
         """Return a valid access token, refreshing it if missing or near expiry."""
@@ -52,6 +62,19 @@ class TokenManager:
             self._refresh()
         assert self._access_token is not None  # set by _refresh on success
         return self._access_token
+
+    def _adopt(self, stored: StoredTokens | None) -> None:
+        """Take over persisted tokens, but only if this env seeded them.
+
+        A fingerprint mismatch means ``BLING_REFRESH_TOKEN`` was re-bootstrapped
+        since the entry was written, so the entry is stale and gets ignored —
+        otherwise the old token would silently mask the new one.
+        """
+        if stored is None or stored.seed_fingerprint != self._seed_fingerprint:
+            return
+        self._refresh_token = stored.refresh_token
+        self._access_token = stored.access_token
+        self._expires_at = stored.expires_at
 
     def _refresh(self) -> None:
         credentials = f"{self._config.client_id}:{self._config.client_secret}"
@@ -82,3 +105,15 @@ class TokenManager:
         rotated = payload.get("refresh_token")
         if rotated:
             self._refresh_token = rotated
+        self._persist()
+
+    def _persist(self) -> None:
+        self._store.save(
+            self._config.client_id,
+            StoredTokens(
+                refresh_token=self._refresh_token,
+                seed_fingerprint=self._seed_fingerprint,
+                access_token=self._access_token,
+                expires_at=self._expires_at,
+            ),
+        )

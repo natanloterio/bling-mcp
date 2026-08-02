@@ -11,6 +11,7 @@ import pytest
 
 from bling_mcp.auth import AuthError, TokenManager
 from bling_mcp.config import BlingConfig
+from bling_mcp.token_store import StoredTokens, fingerprint
 
 
 def make_config(**over):
@@ -140,3 +141,142 @@ def test_raises_auth_error_on_non_2xx():
 
     with pytest.raises(AuthError):
         tm.get_access_token()
+
+
+class FakeStore:
+    """In-memory TokenStore double — records saves, never touches disk."""
+
+    def __init__(self, entries=None):
+        self.entries = dict(entries or {})
+        self.saves = []
+
+    def load(self, client_id):
+        return self.entries.get(client_id)
+
+    def save(self, client_id, tokens):
+        self.saves.append((client_id, tokens))
+        self.entries = {**self.entries, client_id: tokens}
+
+
+def test_empty_store_falls_back_to_the_env_seed():
+    client, reqs = build_client([{"json": {"access_token": "AT1", "expires_in": 3600}}])
+    tm = TokenManager(
+        make_config(refresh_token="r0"), client, clock=FakeClock(), store=FakeStore()
+    )
+
+    tm.get_access_token()
+
+    assert "refresh_token=r0" in reqs[0].content.decode()
+
+
+def test_matching_fingerprint_adopts_the_stored_refresh_token():
+    store = FakeStore(
+        {"id": StoredTokens(refresh_token="r-rotated", seed_fingerprint=fingerprint("r0"))}
+    )
+    client, reqs = build_client([{"json": {"access_token": "AT1", "expires_in": 3600}}])
+    tm = TokenManager(
+        make_config(refresh_token="r0"), client, clock=FakeClock(), store=store
+    )
+
+    tm.get_access_token()
+
+    assert "refresh_token=r-rotated" in reqs[0].content.decode()
+
+
+def test_divergent_fingerprint_discards_the_store_and_uses_the_new_seed():
+    """A re-bootstrapped BLING_REFRESH_TOKEN must win over the stale entry."""
+    store = FakeStore(
+        {
+            "id": StoredTokens(
+                refresh_token="r-from-old-bootstrap",
+                seed_fingerprint=fingerprint("r-previous-seed"),
+            )
+        }
+    )
+    client, reqs = build_client([{"json": {"access_token": "AT1", "expires_in": 3600}}])
+    tm = TokenManager(
+        make_config(refresh_token="r-new-seed"), client, clock=FakeClock(), store=store
+    )
+
+    tm.get_access_token()
+
+    assert "refresh_token=r-new-seed" in reqs[0].content.decode()
+
+
+def test_valid_stored_access_token_avoids_any_http_call():
+    clock = FakeClock(1000.0)
+    store = FakeStore(
+        {
+            "id": StoredTokens(
+                refresh_token="r1",
+                seed_fingerprint=fingerprint("r0"),
+                access_token="AT-CACHED",
+                expires_at=1000.0 + 3600,
+            )
+        }
+    )
+    client, reqs = build_client([{"json": {"access_token": "AT-NEW", "expires_in": 3600}}])
+    tm = TokenManager(make_config(refresh_token="r0"), client, clock=clock, store=store)
+
+    assert tm.get_access_token() == "AT-CACHED"
+    assert reqs == []
+
+
+def test_expired_stored_access_token_triggers_a_refresh():
+    clock = FakeClock(1000.0)
+    store = FakeStore(
+        {
+            "id": StoredTokens(
+                refresh_token="r1",
+                seed_fingerprint=fingerprint("r0"),
+                access_token="AT-STALE",
+                expires_at=900.0,  # already past
+            )
+        }
+    )
+    client, reqs = build_client([{"json": {"access_token": "AT-NEW", "expires_in": 3600}}])
+    tm = TokenManager(make_config(refresh_token="r0"), client, clock=clock, store=store)
+
+    assert tm.get_access_token() == "AT-NEW"
+    assert len(reqs) == 1
+
+
+def test_refresh_persists_the_rotated_token_set():
+    clock = FakeClock(1000.0)
+    store = FakeStore()
+    client, _ = build_client(
+        [{"json": {"access_token": "AT1", "expires_in": 3600, "refresh_token": "r-next"}}]
+    )
+    tm = TokenManager(make_config(refresh_token="r0"), client, clock=clock, store=store)
+
+    tm.get_access_token()
+
+    client_id, saved = store.saves[-1]
+    assert client_id == "id"
+    assert saved.refresh_token == "r-next"
+    assert saved.access_token == "AT1"
+    assert saved.expires_at == 1000.0 + 3600
+    assert saved.seed_fingerprint == fingerprint("r0")
+
+
+def test_store_is_optional_and_defaults_to_no_persistence():
+    client, reqs = build_client([{"json": {"access_token": "AT1", "expires_in": 3600}}])
+    tm = TokenManager(make_config(), client, clock=FakeClock())
+
+    assert tm.get_access_token() == "AT1"
+    assert len(reqs) == 1
+
+
+def test_default_clock_is_wall_clock_so_expiry_survives_restart():
+    import time as time_module
+
+    store = FakeStore()
+    client, _ = build_client([{"json": {"access_token": "AT1", "expires_in": 3600}}])
+    tm = TokenManager(make_config(), client, store=store)  # no clock injected
+
+    tm.get_access_token()
+
+    # A persisted expiry is only meaningful as wall-clock. time.monotonic() is
+    # relative to process start, so it would land near 3600, not near now+3600.
+    _, saved = store.saves[-1]
+    assert abs(saved.expires_at - (time_module.time() + 3600)) < 5
