@@ -138,12 +138,26 @@ function ConvertTo-HashtableRecursive($obj) {
     return $obj
 }
 
-if ($SkipClaudeConfig) {
-    Write-Step "Skipping Claude Desktop configuration (-SkipClaudeConfig)"
-} else {
-    Write-Step "Registering server with Claude Desktop"
-    $configPath = Join-Path $env:APPDATA "Claude\claude_desktop_config.json"
-    $configDir = Split-Path $configPath
+# The Microsoft Store build of Claude Desktop (MSIX) virtualizes %APPDATA%: it
+# reads its config from %LOCALAPPDATA%\Packages\<Claude package>\LocalCache\
+# Roaming\Claude, and the package folder name carries a per-publisher hash, so
+# it cannot be hardcoded. Discover every install's config dir and write to all.
+function Find-ClaudeConfigDirs {
+    $dirs = @()
+    $pkgRoot = Join-Path $env:LOCALAPPDATA "Packages"
+    if (Test-Path $pkgRoot) {
+        Get-ChildItem $pkgRoot -Directory -Filter "*Claude*" -ErrorAction SilentlyContinue |
+            ForEach-Object { $dirs += Join-Path $_.FullName "LocalCache\Roaming\Claude" }
+    }
+    $appDataDir = Join-Path $env:APPDATA "Claude"
+    # Include %APPDATA%\Claude when the direct-download build is present, or as
+    # the fallback when no Store package was found.
+    if ((Test-Path $appDataDir) -or $dirs.Count -eq 0) { $dirs += $appDataDir }
+    return $dirs
+}
+
+function Register-BlingServer($configDir) {
+    $configPath = Join-Path $configDir "claude_desktop_config.json"
     if (-not (Test-Path $configDir)) { New-Item -ItemType Directory -Path $configDir -Force | Out-Null }
 
     $config = @{}
@@ -176,6 +190,15 @@ if ($SkipClaudeConfig) {
     # parsers (Claude Desktop ignores the whole file). Write UTF-8 *without* BOM.
     [System.IO.File]::WriteAllText($configPath, $json, (New-Object System.Text.UTF8Encoding($false)))
     Write-Ok "Wrote $configPath"
+}
+
+if ($SkipClaudeConfig) {
+    Write-Step "Skipping Claude Desktop configuration (-SkipClaudeConfig)"
+} else {
+    Write-Step "Registering server with Claude Desktop"
+    $claudeDirs = Find-ClaudeConfigDirs
+    Write-Note "Claude config locations found: $($claudeDirs.Count)"
+    foreach ($dir in $claudeDirs) { Register-BlingServer $dir }
 }
 
 # --- 5. smoke test -----------------------------------------------------------

@@ -45,6 +45,11 @@ This creates `.venv\Scripts\python.exe` — the interpreter the MCP client will 
 
 Edit `%APPDATA%\Claude\claude_desktop_config.json` (create it if missing).
 
+> **Microsoft Store build?** The Store (MSIX) build does *not* read that path —
+> see [Windows gotchas](#windows-gotchas) below. The safest way on any build is
+> **Settings → Developer → Edit Config** inside the app, which always opens the
+> file the app actually uses. (`setup-windows.ps1` handles both automatically.)
+
 **Recommended — point straight at the venv Python (no PATH dependency):**
 
 ```json
