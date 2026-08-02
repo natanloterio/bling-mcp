@@ -58,7 +58,11 @@ registers the server with Claude Desktop, and smoke-tests it. See
 
 Credentials are OAuth 2.0 from your Bling app
 (see https://www.bling.com.br/cadastro.api.php). The server auto-refreshes the
-short-lived access token from your refresh token. To obtain the first refresh
+short-lived access token from your refresh token, and persists the rotated
+refresh token to a small JSON cache (default path is the OS state dir; override
+with `BLING_TOKEN_STORE`) so restarts don't fall back to a stale seed — see
+[INSTALL.md](INSTALL.md#where-the-token-is-cached) for the per-platform paths
+and the residual 30-day idle limitation. To obtain the first refresh
 token: `python -m bling_mcp.authorize url --client-id <ID>` then
 `python -m bling_mcp.authorize exchange --code <CODE> --refresh-only`.
 

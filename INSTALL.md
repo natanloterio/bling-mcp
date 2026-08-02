@@ -17,6 +17,7 @@ with these environment variables set:
 | `BLING_ACCOUNT_LABEL` | no | display label, default `default` |
 | `BLING_API_BASE_URL` | no | default `https://api.bling.com.br/Api/v3` |
 | `BLING_TOKEN_URL` | no | default `https://www.bling.com.br/Api/v3/oauth/token` |
+| `BLING_TOKEN_STORE` | no | path to the token cache; default is the OS state dir (see below) |
 
 ---
 
@@ -134,7 +135,38 @@ Bling's `BLING_REFRESH_TOKEN` comes from a one-time authorization-code flow:
    ```
 4. The response includes `refresh_token` — use it as `BLING_REFRESH_TOKEN`.
 
-The server auto-refreshes the short-lived access token from there on.
+The server auto-refreshes the short-lived access token from there on, and
+**persists the rotated refresh token** so it survives restarts.
+
+### Where the token is cached
+
+Bling's refresh token expires 30 days after it's issued. Refreshing it returns
+the same response shape as the initial exchange above, including a **new
+refresh token with its own fresh 30-day window** — so the server mirrors the
+current token set to:
+
+| Platform | Default path |
+|---|---|
+| Windows | `%LOCALAPPDATA%\bling-mcp\token.json` |
+| macOS | `~/Library/Application Support/bling-mcp/token.json` |
+| Linux | `$XDG_STATE_HOME/bling-mcp/token.json`, else `~/.local/state/bling-mcp/token.json` |
+
+Override with `BLING_TOKEN_STORE`. The file holds live credentials — it is
+created mode `0600` on macOS/Linux; on Windows it relies on the user profile.
+
+`BLING_REFRESH_TOKEN` stays required: it is the seed. The cache records which
+seed produced it, so re-running the OAuth bootstrap and pasting a new token into
+the config just works — the stale cache entry is discarded automatically. If the
+cache cannot be read or written, the server prints a warning to stderr and keeps
+running with the token in memory only.
+
+**This does not make the token immortal.** As long as the server refreshes at
+least once within any 30-day window, the rolling window keeps renewing and it
+never lapses. But if the server sits idle longer than that — stopped,
+unreachable, or simply not invoked — the stored refresh token expires on
+Bling's side regardless of the cache, and every refresh attempt then fails
+(`HTTP 400` from the token endpoint) until someone re-runs the one-time OAuth
+bootstrap above and supplies a fresh `BLING_REFRESH_TOKEN`.
 
 ## Verify it works
 

@@ -1,7 +1,7 @@
 [project]
 name = "bling-mcp"
 version = "0.1.0"
-description = "MCP server for Bling ERP (bling.com.br) v3 API — read-only tools over OAuth 2.0."
+description = "MCP server for Bling ERP (bling.com.br) v3 API — full CRUD over OAuth 2.0."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

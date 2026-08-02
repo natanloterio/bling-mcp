@@ -55,7 +55,7 @@ design → implement → test progress until the MCP is functional, then stops.
 - [x] `setup-windows.bat` — double-click launcher (ExecutionPolicy Bypass)
 - [x] Verified the script's Python dependencies on Linux: `authorize url` CLI + the embedded stdio smoke (prints 16). PowerShell itself unrunnable here (no pwsh) — written to PS 5.1 spec and reviewed.
 
-### Iteration 5 — full API coverage: CRUD + all modules ✅ (80 tests green, 93% coverage)
+### Iteration 5 — full API coverage: CRUD + all modules ✅ (62 tests green, 93% coverage)
 - [x] **Scope change:** from 16 read-only tools → **218 tools** (217 endpoints 1:1 with Bling v3 + meta). Full CRUD (GET/POST/PUT/PATCH/DELETE) + special actions. Writes enabled, no gate (per user decision).
 - [x] `client.py` — added write verbs `post/put/patch/delete` via a shared `_request`; 204/empty body → `None`; `Content-Type: application/json` only when a body is sent.
 - [x] **Declarative architecture** — `tools/spec.py` (`Endpoint`/`Param`, frozen), `tools/factory.py` (`build_tool` builds a typed MCP tool per spec via dynamic `__signature__`; validated by a FastMCP spike), `tools/registry.py` (aggregates 10 domain modules → `ALL_ENDPOINTS`, `MODULES`).
@@ -67,8 +67,34 @@ design → implement → test progress until the MCP is functional, then stops.
 
 **Extraction recipe (reusable):** SDK `this.repository.index/show/store/update/replace/destroy` → `GET-list/GET-one/POST/PUT/PATCH/DELETE`; exact path from the literal `endpoint:` string, confirmed by the JSDoc `@see .../referencia#/<Mod>/<operationId>` fragment (`_`=`/`, `__name_`=`/{name}`, prefix = verb).
 
+### Iteration 6 — token persistence + 401 retry ✅ (115 tests green, 94% coverage)
+
+- [x] `token_store.py` — `TokenStore` Protocol, `NullTokenStore`, `JsonFileTokenStore`
+      (atomic write via `os.replace`, `0600` on POSIX, per-`client_id` entries).
+- [x] `auth.py` — boots from the store, adopts persisted tokens only when the
+      seed fingerprint matches (so a re-bootstrap wins), persists after every
+      refresh, and gained `force_refresh()` which re-reads the store first.
+- [x] Clock default moved from `time.monotonic` to `time.time` — a persisted
+      expiry has to survive the process. Trade-off recorded in the module docstring.
+- [x] `client.py` — one retry on 401 via `force_refresh()`; closes the item
+      deferred back in iteration 2.
+- [x] `config.py`/`server.py` — `BLING_TOKEN_STORE` override, platform default.
+- [x] Store failures degrade with a stderr warning; they never raise.
+
+**Fixes:** the rotated refresh token used to live only in memory, so every
+restart fell back to the original env-seeded token — which carries its own
+fixed 30-day clock from the moment it was first issued. Nothing showed the
+seed itself was invalidated by rotation; the process just never advanced past
+that fixed expiry because it kept discarding every rotated (and later-issued)
+refresh token on exit. Once the seed's 30 days ran out, every refresh attempt
+failed with `HTTP 400` from the token endpoint — across restarts — until
+someone re-ran the OAuth bootstrap by hand. Persisting the rotated token keeps
+the 30-day window rolling forward instead of resetting to the original seed on
+every restart; it does not remove Bling's 30-day expiry itself (see
+[INSTALL.md](INSTALL.md#where-the-token-is-cached)).
+
 ### Remaining polish (optional — run `/loop ...` again to resume)
 - [ ] Sample `manifests/claude_desktop_config.json` committed to the repo
-- [ ] 401 → force-refresh-and-retry-once in `BlingClient`
 - [ ] `x-bling-homologacao` header support for the `homologacao` module (needs per-endpoint header spec)
 - [ ] Publish to PyPI so install collapses to `uvx bling-mcp`
+- [ ] Retry/backoff for 429 honouring `Retry-After`
