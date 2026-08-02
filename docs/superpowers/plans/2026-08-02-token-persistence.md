@@ -713,15 +713,16 @@ def test_store_is_optional_and_defaults_to_no_persistence():
 def test_default_clock_is_wall_clock_so_expiry_survives_restart():
     import time as time_module
 
-    from bling_mcp import auth as auth_module
-
+    store = FakeStore()
     client, _ = build_client([{"json": {"access_token": "AT1", "expires_in": 3600}}])
-    tm = TokenManager(make_config(), client)
+    tm = TokenManager(make_config(), client, store=store)  # no clock injected
+
     tm.get_access_token()
 
-    # Wall-clock expiry lands near time.time(), not near time.monotonic().
-    assert abs(tm._expires_at - (time_module.time() + 3600)) < 5
-    assert auth_module.TokenManager.__init__.__defaults__ is not None
+    # A persisted expiry is only meaningful as wall-clock. time.monotonic() is
+    # relative to process start, so it would land near 3600, not near now+3600.
+    _, saved = store.saves[-1]
+    assert abs(saved.expires_at - (time_module.time() + 3600)) < 5
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
