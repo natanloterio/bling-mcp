@@ -12,6 +12,7 @@ filesystem, matching how the HTTP client and clock are already injected.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import sys
 from dataclasses import dataclass
@@ -82,3 +83,117 @@ def default_store_path(
         base = Path(env.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
 
     return base / APP_DIR_NAME / STORE_FILE_NAME
+
+
+class JsonFileTokenStore:
+    """Mirrors token state to a JSON file, keyed by ``client_id``.
+
+    Every failure is non-fatal: an unusable cache file must never stop the
+    server from serving. Problems are reported on stderr once per process so a
+    refresh loop cannot flood the log.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = Path(path)
+        self._warned = False
+
+    def load(self, client_id: str) -> StoredTokens | None:
+        document = self._read_document()
+        if document is None:
+            return None
+
+        accounts = document.get("accounts")
+        entry = accounts.get(client_id) if isinstance(accounts, dict) else None
+        if entry is None:
+            return None  # no entry for this client is normal, not a problem
+        if not isinstance(entry, dict):
+            self._warn(f"ignoring malformed entry for {client_id} in {self.path}")
+            return None
+
+        try:
+            return StoredTokens(
+                refresh_token=entry["refresh_token"],
+                seed_fingerprint=entry["seed_fingerprint"],
+                access_token=entry.get("access_token"),
+                expires_at=float(entry.get("expires_at") or 0.0),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            self._warn(f"ignoring malformed entry for {client_id} in {self.path}: {exc}")
+            return None
+
+    def save(self, client_id: str, tokens: StoredTokens) -> None:
+        document = self._read_document() or {}
+        accounts = document.get("accounts")
+        accounts = accounts if isinstance(accounts, dict) else {}
+
+        self._write_document(
+            {
+                **document,
+                "version": STORE_VERSION,
+                "accounts": {
+                    **accounts,
+                    client_id: {
+                        "refresh_token": tokens.refresh_token,
+                        "seed_fingerprint": tokens.seed_fingerprint,
+                        "access_token": tokens.access_token,
+                        "expires_at": tokens.expires_at,
+                    },
+                },
+            }
+        )
+
+    def _read_document(self) -> dict | None:
+        try:
+            raw = self.path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            self._warn(f"could not read token store {self.path}: {exc}")
+            return None
+
+        try:
+            document = json.loads(raw)
+        except ValueError as exc:
+            self._warn(f"ignoring malformed token store {self.path}: {exc}")
+            return None
+
+        if not isinstance(document, dict):
+            self._warn(f"ignoring malformed token store {self.path}: not an object")
+            return None
+        return document
+
+    def _write_document(self, document: dict) -> None:
+        temp = self.path.with_name(self.path.name + ".tmp")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            temp.write_text(json.dumps(document, indent=2), encoding="utf-8")
+            self._restrict_permissions(temp)
+            # os.replace is atomic on POSIX and on Windows within one volume, so
+            # a crash mid-write can never leave a truncated store behind.
+            os.replace(temp, self.path)
+        except OSError as exc:
+            self._warn(f"could not write token store {self.path}: {exc}")
+            _remove_quietly(temp)
+
+    def _restrict_permissions(self, path: Path) -> None:
+        """Limit the file to its owner on POSIX; Windows relies on the profile."""
+        if os.name != "posix":
+            return
+        try:
+            os.chmod(path, 0o600)
+        except OSError as exc:
+            self._warn(f"could not restrict permissions on {path}: {exc}")
+
+    def _warn(self, message: str) -> None:
+        if self._warned:
+            return
+        self._warned = True
+        print(f"[bling-mcp] token store: {message}", file=sys.stderr)
+
+
+def _remove_quietly(path: Path) -> None:
+    """Best-effort cleanup of a temp file whose write already failed."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
