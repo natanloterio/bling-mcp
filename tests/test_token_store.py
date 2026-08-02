@@ -243,6 +243,41 @@ def test_save_warns_and_does_not_raise_when_path_is_unwritable(tmp_path, capsys)
     assert "token store" in capsys.readouterr().err
 
 
+def test_save_warns_and_cleans_up_temp_file_when_replace_fails(tmp_path, monkeypatch, capsys):
+    """Distinct from the unwritable-path test above: here mkstemp, the write,
+    and the chmod all succeed, and only the final os.replace fails -- the
+    other reachable branch of _write_document's second try, exercised by
+    nothing else in this file.
+    """
+    path = tmp_path / "token.json"
+    store = JsonFileTokenStore(path)
+
+    def raising_replace(_src, _dst):
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(os, "replace", raising_replace)
+
+    store.save("client-1", make_tokens())  # must not raise
+
+    assert "token store" in capsys.readouterr().err
+    assert list(tmp_path.iterdir()) == []  # per-writer temp file cleaned up, nothing installed
+
+
+def test_remove_quietly_swallows_oserror(monkeypatch):
+    """The one sanctioned silent-failure path: cleanup of an already-failed
+    write must never itself raise, even if unlink fails for a reason
+    missing_ok=True does not cover (e.g. a permissions error).
+    """
+    from bling_mcp.token_store import _remove_quietly
+
+    def raising_unlink(self, missing_ok=False):
+        raise PermissionError("simulated unlink failure")
+
+    monkeypatch.setattr(Path, "unlink", raising_unlink)
+
+    _remove_quietly(Path("/some/irrelevant/path"))  # must not raise
+
+
 def test_save_warns_only_once_per_process(tmp_path, capsys):
     blocker = tmp_path / "blocker"
     blocker.write_text("file", encoding="utf-8")
