@@ -63,6 +63,20 @@ class TokenManager:
         assert self._access_token is not None  # set by _refresh on success
         return self._access_token
 
+    def force_refresh(self) -> str:
+        """Refresh unconditionally, consulting the store first.
+
+        Called after the API rejects a token with 401. Another process may have
+        rotated the refresh token since this one loaded it, so the disk copy is
+        re-read before spending the in-memory token on a request that would
+        fail. The seed fingerprint is unchanged by rotation, so an entry written
+        by a sibling process is always adopted.
+        """
+        self._adopt(self._store.load(self._config.client_id))
+        self._refresh()
+        assert self._access_token is not None  # set by _refresh on success
+        return self._access_token
+
     def _adopt(self, stored: StoredTokens | None) -> None:
         """Take over persisted tokens, but only if this env seeded them.
 

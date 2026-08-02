@@ -280,3 +280,61 @@ def test_default_clock_is_wall_clock_so_expiry_survives_restart():
     # relative to process start, so it would land near 3600, not near now+3600.
     _, saved = store.saves[-1]
     assert abs(saved.expires_at - (time_module.time() + 3600)) < 5
+
+
+def test_force_refresh_ignores_a_still_valid_cached_token():
+    clock = FakeClock()
+    client, reqs = build_client(
+        [
+            {"json": {"access_token": "AT1", "expires_in": 3600}},
+            {"json": {"access_token": "AT2", "expires_in": 3600}},
+        ]
+    )
+    tm = TokenManager(make_config(), client, clock=clock)
+
+    assert tm.get_access_token() == "AT1"
+    assert tm.force_refresh() == "AT2"
+    assert len(reqs) == 2
+
+
+def test_force_refresh_returns_the_new_token_for_subsequent_calls():
+    clock = FakeClock()
+    client, _ = build_client(
+        [
+            {"json": {"access_token": "AT1", "expires_in": 3600}},
+            {"json": {"access_token": "AT2", "expires_in": 3600}},
+        ]
+    )
+    tm = TokenManager(make_config(), client, clock=clock)
+
+    tm.get_access_token()
+    tm.force_refresh()
+
+    assert tm.get_access_token() == "AT2"
+
+
+def test_force_refresh_picks_up_a_token_rotated_by_another_process():
+    """Two servers share the store; the loser must not refresh with a dead token."""
+    clock = FakeClock()
+    store = FakeStore()
+    client, reqs = build_client([{"json": {"access_token": "AT2", "expires_in": 3600}}])
+    tm = TokenManager(make_config(refresh_token="r0"), client, clock=clock, store=store)
+
+    # Another process rotates r0 -> r-other and writes it to the shared store.
+    store.entries = {
+        "id": StoredTokens(
+            refresh_token="r-other", seed_fingerprint=fingerprint("r0")
+        )
+    }
+
+    tm.force_refresh()
+
+    assert "refresh_token=r-other" in reqs[0].content.decode()
+
+
+def test_force_refresh_propagates_auth_error():
+    client, _ = build_client([{"status": 401, "json": {"error": "invalid_grant"}}])
+    tm = TokenManager(make_config(), client, clock=FakeClock())
+
+    with pytest.raises(AuthError):
+        tm.force_refresh()
