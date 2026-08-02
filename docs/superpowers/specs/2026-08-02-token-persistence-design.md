@@ -11,10 +11,15 @@ O `TokenManager` renova o access token corretamente **dentro do processo**
 reiniciar o Claude Desktop, reboot, crash — `load_config` relê
 `BLING_REFRESH_TOKEN` do ambiente, que é o token original do bootstrap OAuth.
 
-Se o Bling invalida o refresh token anterior ao rotacionar (comportamento padrão
-de rotação; **não verificado contra a API real** — o comentário em `auth.py:5`
-diz apenas "may rotate"), a autenticação passa a falhar após o primeiro refresh
-seguido de restart, exigindo re-executar o bootstrap manual.
+O refresh token do Bling expira 30 dias após ser emitido; um refresh
+bem-sucedido retorna um refresh token **novo**, com uma janela de 30 dias
+reiniciada (verificado em developer.bling.com.br/aplicativos e confirmado por
+log de produção — não há evidência de que o token anterior seja invalidado
+pela rotação). O bug é que o token rotacionado, que carregava esse relógio
+reiniciado, era descartado por viver só em memória: a cada restart o processo
+voltava a semear do `BLING_REFRESH_TOKEN` original do ambiente, cujo relógio de
+30 dias seguia contando desde o bootstrap inicial e vencia no prazo —
+produzindo `HTTP 400` a partir daí, exigindo re-executar o bootstrap manual.
 
 Problema secundário, listado como pendente desde a iteração 2
 (`PROGRESS.md:72`): `client.py:79-84` levanta `BlingApiError` direto em 401, sem
