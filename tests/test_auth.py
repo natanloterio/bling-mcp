@@ -11,7 +11,7 @@ import pytest
 
 from bling_mcp.auth import AuthError, TokenManager
 from bling_mcp.config import BlingConfig
-from bling_mcp.token_store import StoredTokens, fingerprint
+from bling_mcp.token_store import JsonFileTokenStore, StoredTokens, fingerprint
 
 
 def make_config(**over):
@@ -338,3 +338,35 @@ def test_force_refresh_propagates_auth_error():
 
     with pytest.raises(AuthError):
         tm.force_refresh()
+
+
+def test_restart_reuses_the_rotated_refresh_token_from_a_real_store(tmp_path):
+    """The seam every other test misses: a real JsonFileTokenStore composed
+    with TokenManager, round-tripped through actual JSON, across a process
+    restart (a second TokenManager over the same file). FakeStore never
+    exercises the JSON encode/decode of expires_at and access_token that
+    production restarts depend on.
+    """
+    store_path = tmp_path / "token.json"
+    clock = FakeClock()
+
+    client1, _ = build_client(
+        [{"json": {"access_token": "AT1", "expires_in": 3600, "refresh_token": "r1"}}]
+    )
+    tm1 = TokenManager(
+        make_config(refresh_token="r0"), client1, clock=clock, store=JsonFileTokenStore(store_path)
+    )
+    tm1.get_access_token()  # refreshes r0 -> r1 and persists it to disk
+    del tm1  # simulate the process exiting; only the file survives
+
+    clock.advance(3600)  # past AT1's expiry, forcing the restarted manager to refresh
+    client2, reqs2 = build_client(
+        [{"json": {"access_token": "AT2", "expires_in": 3600, "refresh_token": "r2"}}]
+    )
+    tm2 = TokenManager(
+        make_config(refresh_token="r0"), client2, clock=clock, store=JsonFileTokenStore(store_path)
+    )
+    tm2.get_access_token()
+
+    # Must carry the rotated r1 from disk, not fall back to the env seed r0.
+    assert "refresh_token=r1" in reqs2[0].content.decode()
