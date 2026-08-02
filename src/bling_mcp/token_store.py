@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Protocol
@@ -102,11 +103,10 @@ class JsonFileTokenStore:
         if document is None:
             return None
 
-        accounts = document.get("accounts")
-        if accounts is not None and not isinstance(accounts, dict):
-            self._warn(f"ignoring malformed accounts in {self.path}: expected dict, got {type(accounts).__name__}")
+        accounts = self._accounts_of(document)
+        if accounts is None:
             return None
-        entry = accounts.get(client_id) if isinstance(accounts, dict) else None
+        entry = accounts.get(client_id)
         if entry is None:
             return None  # no entry for this client is normal, not a problem
         if not isinstance(entry, dict):
@@ -126,12 +126,7 @@ class JsonFileTokenStore:
 
     def save(self, client_id: str, tokens: StoredTokens) -> None:
         document = self._read_document() or {}
-        accounts = document.get("accounts")
-        if accounts is not None and not isinstance(accounts, dict):
-            self._warn(f"ignoring malformed accounts in {self.path}: expected dict, got {type(accounts).__name__}")
-            accounts = {}
-        else:
-            accounts = accounts if isinstance(accounts, dict) else {}
+        accounts = self._accounts_of(document) or {}
 
         self._write_document(
             {
@@ -169,16 +164,45 @@ class JsonFileTokenStore:
             return None
         return document
 
+    def _accounts_of(self, document: dict) -> dict | None:
+        """Extract ``document["accounts"]`` as a dict.
+
+        A missing key is normal (empty store) and returns ``{}`` without a
+        warning. A present-but-wrong-shaped value warns and returns ``None``,
+        letting each caller decide whether that is fatal (``load``) or
+        recoverable by starting from an empty dict (``save``).
+        """
+        accounts = document.get("accounts")
+        if accounts is None:
+            return {}
+        if not isinstance(accounts, dict):
+            self._warn(f"ignoring malformed accounts in {self.path}: expected dict, got {type(accounts).__name__}")
+            return None
+        return accounts
+
     def _write_document(self, document: dict) -> None:
-        temp = self.path.with_name(self.path.name + ".tmp")
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            temp.write_text(json.dumps(document, indent=2), encoding="utf-8")
+            # A unique name per writer: two processes saving concurrently must
+            # never share one temp path, or the loser's os.replace can install
+            # a half-written file, or fail after the winner already replaced
+            # it out from under them. mkstemp also creates the file at 0600,
+            # so the live refresh token is never briefly group-readable before
+            # _restrict_permissions runs.
+            fd, name = tempfile.mkstemp(dir=self.path.parent, prefix=f"{self.path.name}.", suffix=".tmp")
+        except OSError as exc:
+            self._warn(f"could not write token store {self.path}: {exc}")
+            return
+
+        temp = Path(name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(document, indent=2))
             self._restrict_permissions(temp)
             # os.replace is atomic on POSIX and on Windows within one volume, so
             # a crash mid-write can never leave a truncated store behind.
             os.replace(temp, self.path)
-        except OSError as exc:
+        except (OSError, TypeError) as exc:
             self._warn(f"could not write token store {self.path}: {exc}")
             _remove_quietly(temp)
 

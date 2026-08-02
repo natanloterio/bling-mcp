@@ -6,6 +6,7 @@ directory or the network.
 
 import json
 import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -182,6 +183,54 @@ def test_save_leaves_no_temp_file_behind(tmp_path):
     store.save("client-1", make_tokens())
 
     assert [p.name for p in tmp_path.iterdir()] == ["token.json"]
+
+
+def test_concurrent_saves_use_separate_temp_files_and_cannot_corrupt(tmp_path, monkeypatch):
+    """Two processes sharing one token.json must never write through the same
+    temp path. The interleave is driven directly rather than raced with real
+    threads: the moment store_a claims its temp file (via mkstemp) but before
+    it has written a single byte or replaced anything, store_b is made to run
+    an entire, independent save to completion. That is the exact window the
+    old fixed ``token.json.tmp`` name let two writers collide in.
+
+    With separate temp files there is nothing left to interleave on: whichever
+    save's ``os.replace`` runs last simply wins (an accepted lost update), and
+    the file is always one writer's complete, valid JSON -- never a splice of
+    both.
+    """
+    path = tmp_path / "token.json"
+    store_a = JsonFileTokenStore(path)
+    store_b = JsonFileTokenStore(path)
+
+    real_mkstemp = tempfile.mkstemp
+    temp_names = []
+    triggered = False
+
+    def racing_mkstemp(*args, **kwargs):
+        nonlocal triggered
+        fd, name = real_mkstemp(*args, **kwargs)
+        temp_names.append(name)
+        if not triggered:
+            triggered = True
+            # store_a's temp file exists and is open, but store_a has not
+            # written or replaced anything yet. A concurrent writer must be
+            # free to finish its own save in full right now.
+            store_b.save("client-1", make_tokens(refresh_token="from-b", expires_at=222.0))
+        return fd, name
+
+    monkeypatch.setattr(tempfile, "mkstemp", racing_mkstemp)
+
+    store_a.save("client-1", make_tokens(refresh_token="from-a", expires_at=111.0))
+
+    assert len(temp_names) == 2
+    assert temp_names[0] != temp_names[1]  # each writer got its own file
+
+    # store_a's os.replace ran last (after the nested store_b.save returned),
+    # so store_a's version is installed -- and, critically, it parses cleanly.
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    assert doc["accounts"]["client-1"]["refresh_token"] == "from-a"
+
+    assert [p.name for p in tmp_path.iterdir()] == ["token.json"]  # no .tmp survives
 
 
 def test_save_warns_and_does_not_raise_when_path_is_unwritable(tmp_path, capsys):
