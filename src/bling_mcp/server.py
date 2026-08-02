@@ -8,6 +8,7 @@ registry -> one MCP tool per endpoint (via the factory). Run over stdio via the
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -15,16 +16,27 @@ from mcp.server.fastmcp import FastMCP
 from .auth import TokenManager
 from .client import BlingClient
 from .config import BlingConfig, load_config
+from .token_store import JsonFileTokenStore, default_store_path
 from .tools.factory import build_tool
 from .tools.registry import ALL_ENDPOINTS, MODULES
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
 
 
+def build_token_store(config: BlingConfig) -> JsonFileTokenStore:
+    """Resolve the token store: the configured path, else the platform default."""
+    path = (
+        Path(config.token_store_path)
+        if config.token_store_path
+        else default_store_path()
+    )
+    return JsonFileTokenStore(path)
+
+
 def build_tools(config: BlingConfig) -> BlingClient:
     """Assemble the HTTP client (no network call until a tool runs)."""
     http = httpx.Client(timeout=DEFAULT_TIMEOUT_SECONDS)
-    tokens = TokenManager(config, http)
+    tokens = TokenManager(config, http, store=build_token_store(config))
     return BlingClient(config, tokens, http)
 
 

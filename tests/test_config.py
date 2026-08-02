@@ -103,3 +103,17 @@ def test_config_is_immutable():
 
 def test_config_is_dataclass_instance():
     assert isinstance(load_config(VALID_ENV), BlingConfig)
+
+
+def test_token_store_path_defaults_to_none():
+    assert load_config(_base_env()).token_store_path is None
+
+
+def test_token_store_path_is_read_from_env():
+    cfg = load_config(_base_env(BLING_TOKEN_STORE="/custom/token.json"))
+    assert cfg.token_store_path == "/custom/token.json"
+
+
+def test_blank_token_store_path_is_treated_as_unset():
+    cfg = load_config(_base_env(BLING_TOKEN_STORE="   "))
+    assert cfg.token_store_path is None
