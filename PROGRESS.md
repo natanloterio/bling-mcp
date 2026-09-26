@@ -98,3 +98,16 @@ every restart; it does not remove Bling's 30-day expiry itself (see
 - [ ] `x-bling-homologacao` header support for the `homologacao` module (needs per-endpoint header spec)
 - [ ] Publish to PyPI so install collapses to `uvx bling-mcp`
 - [ ] Retry/backoff for 429 honouring `Retry-After`
+
+### Iteration — in-chat re-authorization ✅ (180 tests green, 95% coverage)
+Problem: Bling's refresh token lapses after 30 idle days; recovery meant the CLI
+bootstrap + editing the MCP client config + restart.
+- [x] `TokenManager.install(payload)` adopts a freshly exchanged token set and persists it under the env seed fingerprint (restart-safe); refresh `400` now names `bling_authorize`
+- [x] `config.oauth_callback_port` from `BLING_OAUTH_CALLBACK_PORT` (default 8765, validated)
+- [x] `oauth_flow.AuthorizationFlow` — per-attempt state machine (pending/completed/failed/expired), random `state`, 5-min timeout
+- [x] `callback_server.CallbackServer` — loopback-only `ThreadingHTTPServer` serving `/callback`, HTML result page, quiet logging
+- [x] `reauth.ReauthService` — owns listener + current flow; degrades to manual paste when the port cannot bind
+- [x] `tools/auth_tools.py` — `bling_authorize`, `bling_auth_status`, `bling_authorize_with_code`; always registered regardless of `BLING_MODULES`
+- [x] `server.build_runtime` shares one `TokenManager` between `BlingClient` and `ReauthService`
+- Review fixes: flow lock (PENDING→EXCHANGING claim, duplicate callbacks exchange once), non-ASCII `state` no longer crashes the handler, catch-all 500 page, exclusive port bind (Windows `SO_REUSEADDR`), `redirect_uri` echoed in the token request (RFC 6749 §4.1.3), RLock across `TokenManager` refresh/install
+- Setup: register `http://localhost:8765/callback` as the Bling app redirect URL.

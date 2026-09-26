@@ -370,3 +370,111 @@ def test_restart_reuses_the_rotated_refresh_token_from_a_real_store(tmp_path):
 
     # Must carry the rotated r1 from disk, not fall back to the env seed r0.
     assert "refresh_token=r1" in reqs2[0].content.decode()
+
+
+# --- install (re-authorization from the chat) -----------------------------------
+def test_install_adopts_the_token_set_without_any_http_call():
+    clock = FakeClock(1000.0)
+    client, reqs = build_client([{"json": {"access_token": "AT-NEVER", "expires_in": 1}}])
+    tm = TokenManager(make_config(refresh_token="r-expired"), client, clock=clock)
+
+    tm.install({"access_token": "AT-NEW", "refresh_token": "r-new", "expires_in": 21600})
+
+    assert tm.get_access_token() == "AT-NEW"
+    assert reqs == []
+
+
+def test_install_uses_the_new_refresh_token_on_the_next_refresh():
+    clock = FakeClock(1000.0)
+    client, reqs = build_client([{"json": {"access_token": "AT2", "expires_in": 3600}}])
+    tm = TokenManager(make_config(refresh_token="r-expired"), client, clock=clock)
+
+    tm.install({"access_token": "AT-NEW", "refresh_token": "r-new", "expires_in": 21600})
+    clock.advance(21600)
+    tm.get_access_token()
+
+    assert "refresh_token=r-new" in reqs[0].content.decode()
+
+
+def test_install_persists_under_the_env_seed_fingerprint():
+    """The store entry must be adopted on restart even though the env seed is
+    the old, expired token — the re-authorization continues this install's
+    lineage rather than starting a new one."""
+    clock = FakeClock(1000.0)
+    store = FakeStore()
+    client, _ = build_client([])
+    tm = TokenManager(
+        make_config(refresh_token="r-expired"), client, clock=clock, store=store
+    )
+
+    tm.install({"access_token": "AT-NEW", "refresh_token": "r-new", "expires_in": 21600})
+
+    client_id, saved = store.saves[-1]
+    assert client_id == "id"
+    assert saved.refresh_token == "r-new"
+    assert saved.access_token == "AT-NEW"
+    assert saved.expires_at == 1000.0 + 21600
+    assert saved.seed_fingerprint == fingerprint("r-expired")
+
+
+def test_install_rejects_a_payload_without_a_refresh_token():
+    client, _ = build_client([])
+    tm = TokenManager(make_config(), client, clock=FakeClock())
+
+    with pytest.raises(AuthError):
+        tm.install({"access_token": "AT-NEW", "expires_in": 21600})
+
+
+def test_refresh_rejected_with_400_explains_how_to_reauthorize():
+    client, _ = build_client([{"status": 400, "json": {"error": "invalid_grant"}}])
+    tm = TokenManager(make_config(), client, clock=FakeClock())
+
+    with pytest.raises(AuthError, match="bling_authorize"):
+        tm.get_access_token()
+
+
+# --- thread safety (from code review) -----------------------------------------------
+def test_install_during_an_in_flight_refresh_is_serialized_and_wins():
+    """Callback thread installs a brand-new grant while an MCP tool call is
+    mid-refresh on the old lineage. Without serialization the refresh lands
+    last and overwrites r-new with the rotated old token."""
+    import threading
+    import time as time_module
+
+    clock = FakeClock(1000.0)
+    store = FakeStore()
+    tm = None
+    installer = []
+
+    def handler(request):
+        # First request only: the refresh on the old lineage. While it is in
+        # flight, another thread installs the new grant.
+        if len(reqs_seen) == 0:
+            t = threading.Thread(
+                target=tm.install,
+                args=({"access_token": "AT-NEW", "refresh_token": "r-new", "expires_in": 21600},),
+            )
+            installer.append(t)
+            t.start()
+            time_module.sleep(0.1)  # give an unserialized install time to interleave
+            reqs_seen.append(request)
+            return httpx.Response(
+                200, json={"access_token": "AT-OLD", "expires_in": 1, "refresh_token": "r-rotated-old"},
+                request=request,
+            )
+        reqs_seen.append(request)
+        return httpx.Response(200, json={"access_token": "AT2", "expires_in": 3600}, request=request)
+
+    reqs_seen = []
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    tm = TokenManager(make_config(refresh_token="r0"), client, clock=clock, store=store)
+
+    tm.get_access_token()  # refresh #1, with the install racing it
+    installer[0].join(5)
+
+    clock.advance(100_000)  # force the next refresh, which reveals the winning lineage
+    tm.get_access_token()
+
+    assert "refresh_token=r-new" in reqs_seen[1].content.decode()
+    saved = store.entries["id"]
+    assert (saved.refresh_token, saved.access_token) == ("r-new", "AT-NEW") or saved.refresh_token != "r-rotated-old"

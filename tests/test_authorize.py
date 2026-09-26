@@ -119,3 +119,19 @@ def test_main_exchange_requires_credentials(monkeypatch):
     monkeypatch.delenv("BLING_CLIENT_SECRET", raising=False)
     with pytest.raises(SystemExit):
         main(["exchange", "--code", "C"])
+
+
+def test_exchange_code_includes_redirect_uri_when_given():
+    http, reqs = build_http([{"json": {"access_token": "AT", "refresh_token": "RT"}}])
+
+    exchange_code("CID", "SEC", "C", http, redirect_uri="http://localhost:8765/callback")
+
+    assert parse_qs(reqs[0].content.decode())["redirect_uri"] == ["http://localhost:8765/callback"]
+
+
+def test_exchange_code_omits_redirect_uri_when_absent():
+    http, reqs = build_http([{"json": {"access_token": "AT", "refresh_token": "RT"}}])
+
+    exchange_code("CID", "SEC", "C", http)
+
+    assert "redirect_uri" not in parse_qs(reqs[0].content.decode())

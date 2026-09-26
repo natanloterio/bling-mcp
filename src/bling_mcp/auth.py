@@ -8,6 +8,11 @@ manager tracks its own current refresh token rather than mutating the
 The HTTP client, clock and token store are injected to keep the refresh flow
 testable without network access, real time, or the filesystem.
 
+All token mutation happens under one re-entrant lock: tool calls refresh on the
+MCP thread while the OAuth callback installs a new grant from the listener
+thread, and an unserialized refresh finishing last would overwrite the new
+lineage with a rotated token of the old one.
+
 The clock is wall-clock (``time.time``) rather than ``time.monotonic`` because
 the expiry is persisted and has to remain meaningful across process restarts.
 The cost is sensitivity to clock adjustments; the 60s margin absorbs small
@@ -17,8 +22,9 @@ jumps and the client's 401 retry covers the rest.
 from __future__ import annotations
 
 import base64
+import threading
 import time
-from typing import Callable
+from typing import Any, Callable, Mapping
 
 import httpx
 
@@ -28,6 +34,13 @@ from .token_store import NullTokenStore, StoredTokens, TokenStore, fingerprint
 # Refresh this many seconds before the token actually expires, to avoid using a
 # token that lapses mid-request.
 DEFAULT_EXPIRY_MARGIN_SECONDS = 60
+
+# Bling answers a refresh with an expired or revoked refresh token using 400
+# (``invalid_grant``). The message points the agent at the in-chat fix.
+REAUTHORIZE_HINT = (
+    "Bling refresh token expired or revoked (it lapses after 30 days without a "
+    "refresh). Call the bling_authorize tool to re-authorize from the chat."
+)
 
 
 class AuthError(RuntimeError):
@@ -54,14 +67,16 @@ class TokenManager:
         self._refresh_token = config.refresh_token
         self._access_token: str | None = None
         self._expires_at = 0.0
+        self._lock = threading.RLock()
         self._adopt(self._store.load(config.client_id))
 
     def get_access_token(self) -> str:
         """Return a valid access token, refreshing it if missing or near expiry."""
-        if self._access_token is None or self._clock() >= self._expires_at - self._margin:
-            self._refresh()
-        assert self._access_token is not None  # set by _refresh on success
-        return self._access_token
+        with self._lock:
+            if self._access_token is None or self._clock() >= self._expires_at - self._margin:
+                self._refresh()
+            assert self._access_token is not None  # set by _refresh on success
+            return self._access_token
 
     def force_refresh(self) -> str:
         """Refresh unconditionally, consulting the store first.
@@ -72,10 +87,27 @@ class TokenManager:
         fail. The seed fingerprint is unchanged by rotation, so an entry written
         by a sibling process is always adopted.
         """
-        self._adopt(self._store.load(self._config.client_id))
-        self._refresh()
-        assert self._access_token is not None  # set by _refresh on success
-        return self._access_token
+        with self._lock:
+            self._adopt(self._store.load(self._config.client_id))
+            self._refresh()
+            assert self._access_token is not None  # set by _refresh on success
+            return self._access_token
+
+    def install(self, payload: Mapping[str, Any]) -> None:
+        """Adopt a freshly exchanged token set (authorization-code flow).
+
+        Used by the in-chat re-authorization: the new refresh token replaces the
+        expired one in memory and in the store, under this install's seed
+        fingerprint, so a restart adopts it instead of the dead env seed.
+        """
+        refresh = payload.get("refresh_token")
+        if not refresh:
+            raise AuthError("Authorization response did not include a refresh_token")
+        with self._lock:
+            self._refresh_token = refresh
+            self._access_token = payload.get("access_token")
+            self._expires_at = self._clock() + float(payload.get("expires_in", 0))
+            self._persist()
 
     def _adopt(self, stored: StoredTokens | None) -> None:
         """Take over persisted tokens, but only if this env seeded them.
@@ -109,8 +141,9 @@ class TokenManager:
             raise AuthError(f"Token refresh request failed: {exc}") from exc
 
         if not response.is_success:
+            hint = f" {REAUTHORIZE_HINT}" if response.status_code == 400 else ""
             raise AuthError(
-                f"Token refresh failed: HTTP {response.status_code} {response.text}"
+                f"Token refresh failed: HTTP {response.status_code} {response.text}.{hint}"
             )
 
         payload = response.json()

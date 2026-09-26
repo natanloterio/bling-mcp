@@ -14,8 +14,10 @@ invoices, stock, logistics, production and more.
 
 ## Tools
 
-**218 tools** — one meta tool (`bling_list_accounts`) plus **217 tools mapped 1:1 to
-Bling v3 endpoints**, generated from a declarative endpoint registry. Naming follows
+**221 tools** — one meta tool (`bling_list_accounts`), three re-authorization tools
+(`bling_authorize`, `bling_auth_status`, `bling_authorize_with_code`, see
+[Re-authorizing from the chat](#re-authorizing-from-the-chat)) plus **217 tools mapped
+1:1 to Bling v3 endpoints**, generated from a declarative endpoint registry. Naming follows
 `bling_<verb>_<resource>` (`list`/`get`/`create`/`update`/`delete`, plus special
 actions like `change_situation_*`, `generate_nfe_*`, `post_stock_*`, `reverse_accounts_*`).
 
@@ -31,13 +33,13 @@ actions like `change_situation_*`, `generate_nfe_*`, `post_stock_*`, `reverse_ac
 | `producao` | 7 | ordens de produção |
 | `situacoes` | 12 | situações, módulos, transições |
 | `cadastros` | 34 | categorias de lojas, canais de venda, vendedores, empresas, usuários, campos customizados, contratos, notificações, homologação |
-| **Total** | **217** | + `bling_list_accounts` (local) = **218** |
+| **Total** | **217** | + `bling_list_accounts` + 3 re-auth tools (local) = **221** |
 
 ### Limiting the tool surface
 
-218 tools can exceed some MCP clients' practical limits. Set `BLING_MODULES` (comma-separated
+221 tools can exceed some MCP clients' practical limits. Set `BLING_MODULES` (comma-separated
 domain names from the table above) to expose only the domains you need — omit it to expose
-everything:
+everything. The meta and re-authorization tools are always registered:
 
 ```
 BLING_MODULES=produtos,pedidos,estoque
@@ -65,6 +67,30 @@ with `BLING_TOKEN_STORE`) so restarts don't fall back to a stale seed — see
 and the residual 30-day idle limitation. To obtain the first refresh
 token: `python -m bling_mcp.authorize url --client-id <ID>` then
 `python -m bling_mcp.authorize exchange --code <CODE> --refresh-only`.
+
+### Re-authorizing from the chat
+
+Bling's refresh token expires after **30 days without a refresh**. When that
+happens every call fails with an `AuthError` that tells the agent to call
+`bling_authorize`. No config editing or restart is needed:
+
+1. The agent calls `bling_authorize` and shows you the returned link.
+2. You open it, approve in Bling, and Bling redirects your browser to
+   `http://localhost:8765/callback` (port from `BLING_OAUTH_CALLBACK_PORT`).
+3. The server, listening on that loopback port, exchanges the code, installs
+   the new tokens in memory and persists them to the token cache. The tab shows
+   "Bling autorizado com sucesso".
+4. The agent confirms with `bling_auth_status` and carries on.
+
+**One-time setup:** register `http://localhost:8765/callback` as the app's
+*link de redirecionamento* at https://www.bling.com.br/cadastro.api.php. Bling
+only redirects to the registered URL.
+
+**Fallback:** if the redirect page cannot load (listener could not bind, remote
+MCP host, different machine), copy the `code` parameter from the address bar
+and give it to the agent, which calls `bling_authorize_with_code`. The link is
+valid for 5 minutes; the callback validates an unguessable `state` and only
+binds to `127.0.0.1`.
 
 ## Development
 

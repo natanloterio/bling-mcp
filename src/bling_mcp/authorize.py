@@ -47,13 +47,21 @@ def exchange_code(
     http_client: httpx.Client,
     *,
     token_url: str = DEFAULT_TOKEN_URL,
+    redirect_uri: str | None = None,
 ) -> dict[str, Any]:
-    """Exchange an authorization code for the token set (incl. refresh_token)."""
+    """Exchange an authorization code for the token set (incl. refresh_token).
+
+    ``redirect_uri`` must be repeated here when it was sent in the authorize
+    request (RFC 6749 §4.1.3); the CLI bootstrap never sends one.
+    """
     basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+    data = {"grant_type": "authorization_code", "code": code}
+    if redirect_uri:
+        data["redirect_uri"] = redirect_uri
     try:
         response = http_client.post(
             token_url,
-            data={"grant_type": "authorization_code", "code": code},
+            data=data,
             headers={"Authorization": f"Basic {basic}", "Accept": "application/json"},
         )
     except httpx.HTTPError as exc:

@@ -105,3 +105,45 @@ def test_build_tools_injects_the_token_store(tmp_path):
     client = build_tools(cfg)
 
     assert isinstance(client._tokens._store, JsonFileTokenStore)
+
+
+# --- re-authorization tools --------------------------------------------------------
+import httpx
+
+from bling_mcp.reauth import ReauthService
+from bling_mcp.server import build_runtime
+
+AUTH_TOOL_NAMES = {"bling_authorize", "bling_auth_status", "bling_authorize_with_code"}
+
+
+def make_reauth():
+    from bling_mcp.auth import TokenManager
+
+    cfg = make_config(oauth_callback_port=0)
+    http = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={})))
+    return ReauthService(cfg, http, TokenManager(cfg, http, clock=lambda: 0.0))
+
+
+def test_reauth_tools_are_registered_when_a_service_is_given():
+    names = {t.name for t in create_server(FakeClient(), _Cfg(), make_reauth())._tool_manager.list_tools()}
+    assert AUTH_TOOL_NAMES <= names
+    assert len(names) == len(ALL_ENDPOINTS) + 1 + len(AUTH_TOOL_NAMES)
+
+
+def test_module_filter_never_hides_the_reauth_tools():
+    class C(_Cfg):
+        modules = ("estoque",)
+
+    names = {t.name for t in create_server(FakeClient(), C(), make_reauth())._tool_manager.list_tools()}
+    assert AUTH_TOOL_NAMES <= names
+    assert len(names) == len(MODULES["estoque"]) + 1 + len(AUTH_TOOL_NAMES)
+
+
+def test_build_runtime_shares_one_token_manager_between_client_and_reauth(tmp_path):
+    cfg = make_config(token_store_path=str(tmp_path / "token.json"), oauth_callback_port=0)
+
+    runtime = build_runtime(cfg)
+
+    assert isinstance(runtime.reauth, ReauthService)
+    assert runtime.reauth._tokens is runtime.client._tokens
+    assert isinstance(runtime.client._tokens._store, JsonFileTokenStore)

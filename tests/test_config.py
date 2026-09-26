@@ -117,3 +117,39 @@ def test_token_store_path_is_read_from_env():
 def test_blank_token_store_path_is_treated_as_unset():
     cfg = load_config(_base_env(BLING_TOKEN_STORE="   "))
     assert cfg.token_store_path is None
+
+
+# --- OAuth callback port -----------------------------------------------------------
+def test_oauth_callback_port_defaults_to_8765():
+    cfg = load_config(_base_env())
+    assert cfg.oauth_callback_port == 8765
+
+
+def test_oauth_callback_port_is_read_from_env():
+    cfg = load_config({**_base_env(), "BLING_OAUTH_CALLBACK_PORT": "9001"})
+    assert cfg.oauth_callback_port == 9001
+
+
+def test_oauth_callback_port_rejects_non_numeric_values():
+    with pytest.raises(ConfigError, match="BLING_OAUTH_CALLBACK_PORT"):
+        load_config({**_base_env(), "BLING_OAUTH_CALLBACK_PORT": "abc"})
+
+
+def test_oauth_callback_port_rejects_out_of_range_values():
+    with pytest.raises(ConfigError, match="BLING_OAUTH_CALLBACK_PORT"):
+        load_config({**_base_env(), "BLING_OAUTH_CALLBACK_PORT": "70000"})
+
+
+# --- OAuth redirect host -------------------------------------------------------------
+def test_oauth_redirect_host_defaults_to_localhost():
+    assert load_config(_base_env()).oauth_redirect_host == "localhost"
+
+
+def test_oauth_redirect_host_is_read_and_trimmed_from_env():
+    cfg = load_config({**_base_env(), "BLING_OAUTH_REDIRECT_HOST": " 127.0.0.1 "})
+    assert cfg.oauth_redirect_host == "127.0.0.1"
+
+
+def test_oauth_redirect_host_rejects_a_value_with_a_scheme_or_path():
+    with pytest.raises(ConfigError, match="BLING_OAUTH_REDIRECT_HOST"):
+        load_config({**_base_env(), "BLING_OAUTH_REDIRECT_HOST": "http://x/"})

@@ -18,6 +18,8 @@ with these environment variables set:
 | `BLING_API_BASE_URL` | no | default `https://api.bling.com.br/Api/v3` |
 | `BLING_TOKEN_URL` | no | default `https://www.bling.com.br/Api/v3/oauth/token` |
 | `BLING_TOKEN_STORE` | no | path to the token cache; default is the OS state dir (see below) |
+| `BLING_OAUTH_CALLBACK_PORT` | no | loopback port for in-chat re-authorization, default `8765`; must match the redirect URL registered in the Bling app |
+| `BLING_OAUTH_REDIRECT_HOST` | no | host written into the redirect URL, default `localhost`; use `127.0.0.1` if localhost resolves only to IPv6 |
 
 ---
 
@@ -165,8 +167,34 @@ least once within any 30-day window, the rolling window keeps renewing and it
 never lapses. But if the server sits idle longer than that — stopped,
 unreachable, or simply not invoked — the stored refresh token expires on
 Bling's side regardless of the cache, and every refresh attempt then fails
-(`HTTP 400` from the token endpoint) until someone re-runs the one-time OAuth
-bootstrap above and supplies a fresh `BLING_REFRESH_TOKEN`.
+(`HTTP 400` from the token endpoint). The error message tells the agent to call
+`bling_authorize`, which recovers without touching the config — see below.
+
+## Re-authorizing from the chat (after the 30-day lapse)
+
+1. **Once:** in the Bling app settings (https://www.bling.com.br/cadastro.api.php)
+   set the *link de redirecionamento* to `http://localhost:8765/callback`.
+   Change the port with `BLING_OAUTH_CALLBACK_PORT` if 8765 is taken; the two
+   must match.
+2. In the chat, ask the agent to reconnect Bling (or let it react to the
+   expiry error). It calls `bling_authorize` and shows you a link.
+3. Open the link, approve. Bling redirects the browser to the local callback;
+   the server exchanges the code and persists the new refresh token to the
+   cache above. The page confirms success.
+4. The agent calls `bling_auth_status` and resumes.
+
+If step 3 shows a browser connection error (the listener could not bind, or the
+server runs on another machine), copy the `code` parameter from the address
+bar and tell the agent; it calls `bling_authorize_with_code`.
+
+The link is valid for 5 minutes. The callback listener binds only to
+`127.0.0.1`, validates a random `state`, and is started lazily on the first
+`bling_authorize`. If `localhost` resolves only to IPv6 on your machine (a
+custom hosts file or corporate DNS), register `http://127.0.0.1:8765/callback`
+in Bling instead and set `BLING_OAUTH_REDIRECT_HOST=127.0.0.1`.
+
+`BLING_REFRESH_TOKEN` in the config can stay as it is: the cache records the
+re-authorized token under the same install, so restarts pick it up.
 
 ## Verify it works
 
