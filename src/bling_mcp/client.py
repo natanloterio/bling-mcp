@@ -11,6 +11,7 @@ from typing import Any, Mapping, Protocol
 
 import httpx
 
+from .auth import JWT_HEADER, looks_like_jwt
 from .config import BlingConfig
 
 
@@ -66,6 +67,9 @@ class BlingClient:
         cleaned = _clean_params(params)
 
         def send(token: str) -> httpx.Response:
+            # Bling wants ``enable-jwt: 1`` on every call made with a JWT. It is
+            # keyed on the token's shape, not on config, so an opaque token still
+            # in circulation is never sent with a header the docs do not cover.
             return self._http.request(
                 method,
                 url,
@@ -74,6 +78,7 @@ class BlingClient:
                 headers={
                     "Authorization": f"Bearer {token}",
                     "Accept": "application/json",
+                    **(JWT_HEADER if looks_like_jwt(token) else {}),
                 },
             )
 

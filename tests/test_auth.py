@@ -478,3 +478,39 @@ def test_install_during_an_in_flight_refresh_is_serialized_and_wins():
     assert "refresh_token=r-new" in reqs_seen[1].content.decode()
     saved = store.entries["id"]
     assert (saved.refresh_token, saved.access_token) == ("r-new", "AT-NEW") or saved.refresh_token != "r-rotated-old"
+
+
+# --- JWT opt-in (Bling migração JWT) --------------------------------------------------
+def test_refresh_requests_a_jwt_by_default():
+    client, reqs = build_client([{"json": {"access_token": "AT1", "expires_in": 3600}}])
+    TokenManager(make_config(), client, clock=FakeClock()).get_access_token()
+
+    assert reqs[0].headers["enable-jwt"] == "1"
+
+
+def test_refresh_omits_the_jwt_header_when_disabled():
+    client, reqs = build_client([{"json": {"access_token": "AT1", "expires_in": 3600}}])
+    TokenManager(make_config(enable_jwt=False), client, clock=FakeClock()).get_access_token()
+
+    assert "enable-jwt" not in reqs[0].headers
+
+
+JWT_LIKE = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl"
+
+
+@pytest.mark.parametrize(
+    "token,expected",
+    [
+        (JWT_LIKE, True),
+        ("a3f9c0d1e2b4", False),                 # opaque hex
+        ("eyJhbGciOiJSUzI1NiJ9", False),          # one segment
+        ("eyJ.eyJ", False),                       # two segments
+        ("a.b.c", False),                         # not a JOSE header
+        ("", False),
+        (None, False),
+    ],
+)
+def test_looks_like_jwt(token, expected):
+    from bling_mcp.auth import looks_like_jwt
+
+    assert looks_like_jwt(token) is expected

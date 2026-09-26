@@ -37,6 +37,12 @@ DEFAULT_EXPIRY_MARGIN_SECONDS = 60
 
 # Bling answers a refresh with an expired or revoked refresh token using 400
 # (``invalid_grant``). The message points the agent at the in-chat fix.
+# Header that asks Bling for a JWT instead of an opaque token (both on the token
+# endpoint and, once the token is a JWT, on every API request).
+JWT_HEADER = {"enable-jwt": "1"}
+_JWT_SEGMENTS = 3
+_JOSE_PREFIX = "eyJ"  # base64url of '{"'
+
 REAUTHORIZE_HINT = (
     "Bling refresh token expired or revoked (it lapses after 30 days without a "
     "refresh). Call the bling_authorize tool to re-authorize from the chat."
@@ -45,6 +51,15 @@ REAUTHORIZE_HINT = (
 
 class AuthError(RuntimeError):
     """Raised when an OAuth token refresh fails."""
+
+
+def looks_like_jwt(token: str | None) -> bool:
+    """True when ``token`` has the shape of a compact JWS (three dot-separated
+    base64url segments whose first decodes to a JSON object)."""
+    if not token:
+        return False
+    segments = token.split(".")
+    return len(segments) == _JWT_SEGMENTS and all(segments) and segments[0].startswith(_JOSE_PREFIX)
 
 
 class TokenManager:
@@ -135,6 +150,7 @@ class TokenManager:
                 headers={
                     "Authorization": f"Basic {basic}",
                     "Accept": "application/json",
+                    **(JWT_HEADER if self._config.enable_jwt else {}),
                 },
             )
         except httpx.HTTPError as exc:  # network/transport failure

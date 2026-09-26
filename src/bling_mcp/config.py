@@ -23,6 +23,11 @@ DEFAULT_OAUTH_CALLBACK_PORT = 8765
 DEFAULT_OAUTH_REDIRECT_HOST = "localhost"
 _PORT_RANGE = range(1, 65536)
 _HOST_FORBIDDEN = ("/", ":", " ", "?", "#")
+# Bling is retiring opaque tokens (developer.bling.com.br/migracao-jwt); the
+# ``enable-jwt: 1`` header is on by default and can be switched off if needed.
+DEFAULT_ENABLE_JWT = True
+_TRUTHY = ("1", "true", "yes", "on")
+_FALSY = ("0", "false", "no", "off")
 
 _REQUIRED = ("BLING_CLIENT_ID", "BLING_CLIENT_SECRET", "BLING_REFRESH_TOKEN")
 
@@ -45,6 +50,7 @@ class BlingConfig:
     token_store_path: str | None = None
     oauth_callback_port: int = DEFAULT_OAUTH_CALLBACK_PORT
     oauth_redirect_host: str = DEFAULT_OAUTH_REDIRECT_HOST
+    enable_jwt: bool = DEFAULT_ENABLE_JWT
 
 
 def load_config(env: Mapping[str, str]) -> BlingConfig:
@@ -68,6 +74,7 @@ def load_config(env: Mapping[str, str]) -> BlingConfig:
     store_path = (env.get("BLING_TOKEN_STORE") or "").strip() or None
     callback_port = _parse_port(env.get("BLING_OAUTH_CALLBACK_PORT"))
     redirect_host = _parse_host(env.get("BLING_OAUTH_REDIRECT_HOST"))
+    enable_jwt = _parse_bool("BLING_ENABLE_JWT", env.get("BLING_ENABLE_JWT"), DEFAULT_ENABLE_JWT)
 
     return BlingConfig(
         client_id=env["BLING_CLIENT_ID"].strip(),
@@ -80,6 +87,7 @@ def load_config(env: Mapping[str, str]) -> BlingConfig:
         token_store_path=store_path,
         oauth_callback_port=callback_port,
         oauth_redirect_host=redirect_host,
+        enable_jwt=enable_jwt,
     )
 
 
@@ -109,3 +117,15 @@ def _parse_host(raw: str | None) -> str:
             f"BLING_OAUTH_REDIRECT_HOST must be a bare host name or IP, got {text!r}"
         )
     return text
+
+
+def _parse_bool(name: str, raw: str | None, default: bool) -> bool:
+    """Parse a boolean env var; blank means ``default``."""
+    text = (raw or "").strip().lower()
+    if not text:
+        return default
+    if text in _TRUTHY:
+        return True
+    if text in _FALSY:
+        return False
+    raise ConfigError(f"{name} must be one of 1/0, true/false, yes/no, on/off; got {raw!r}")

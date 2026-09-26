@@ -153,3 +153,23 @@ def test_oauth_redirect_host_is_read_and_trimmed_from_env():
 def test_oauth_redirect_host_rejects_a_value_with_a_scheme_or_path():
     with pytest.raises(ConfigError, match="BLING_OAUTH_REDIRECT_HOST"):
         load_config({**_base_env(), "BLING_OAUTH_REDIRECT_HOST": "http://x/"})
+
+
+# --- JWT opt-in (Bling migração JWT) --------------------------------------------------
+def test_enable_jwt_defaults_to_true():
+    assert load_config(_base_env()).enable_jwt is True
+
+
+@pytest.mark.parametrize("raw", ["0", "false", "no", "off", "False"])
+def test_enable_jwt_can_be_disabled(raw):
+    assert load_config({**_base_env(), "BLING_ENABLE_JWT": raw}).enable_jwt is False
+
+
+@pytest.mark.parametrize("raw", ["1", "true", "yes", "on", "TRUE"])
+def test_enable_jwt_accepts_truthy_spellings(raw):
+    assert load_config({**_base_env(), "BLING_ENABLE_JWT": raw}).enable_jwt is True
+
+
+def test_enable_jwt_rejects_garbage():
+    with pytest.raises(ConfigError, match="BLING_ENABLE_JWT"):
+        load_config({**_base_env(), "BLING_ENABLE_JWT": "maybe"})

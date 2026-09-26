@@ -135,3 +135,34 @@ def test_exchange_code_omits_redirect_uri_when_absent():
     exchange_code("CID", "SEC", "C", http)
 
     assert "redirect_uri" not in parse_qs(reqs[0].content.decode())
+
+
+# --- JWT opt-in (Bling migração JWT) --------------------------------------------------
+def test_exchange_code_sends_the_jwt_header_when_asked():
+    http, reqs = build_http([{"json": {"access_token": "AT", "refresh_token": "RT"}}])
+
+    exchange_code("CID", "SEC", "C", http, enable_jwt=True)
+
+    assert reqs[0].headers["enable-jwt"] == "1"
+
+
+def test_exchange_code_omits_the_jwt_header_by_default():
+    http, reqs = build_http([{"json": {"access_token": "AT", "refresh_token": "RT"}}])
+
+    exchange_code("CID", "SEC", "C", http)
+
+    assert "enable-jwt" not in reqs[0].headers
+
+
+def test_main_exchange_requests_a_jwt_unless_told_otherwise(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        authorize_module, "exchange_code",
+        lambda *a, **k: seen.append(k) or {"refresh_token": "RT"},
+    )
+
+    main(["exchange", "--client-id", "CID", "--client-secret", "SEC", "--code", "C"])
+    main(["exchange", "--client-id", "CID", "--client-secret", "SEC", "--code", "C", "--opaque"])
+
+    assert seen[0]["enable_jwt"] is True
+    assert seen[1]["enable_jwt"] is False

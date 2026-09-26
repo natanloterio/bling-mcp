@@ -68,6 +68,17 @@ and the residual 30-day idle limitation. To obtain the first refresh
 token: `python -m bling_mcp.authorize url --client-id <ID>` then
 `python -m bling_mcp.authorize exchange --code <CODE> --refresh-only`.
 
+### JWT tokens (Bling's opaque-token retirement)
+
+Bling is retiring opaque tokens in favour of JWTs
+([migração JWT](https://developer.bling.com.br/migracao-jwt)); the cut-off date
+is still "em definição". The server already follows the new contract: it sends
+`enable-jwt: 1` on every token request (initial exchange and refresh) and on
+every API call made with a JWT. The header is keyed on the token's shape, so an
+opaque token still in circulation is never sent with it. Set
+`BLING_ENABLE_JWT=0` to keep requesting opaque tokens. JWTs are 1,500–3,000
+characters; the token cache handles that fine.
+
 ### Re-authorizing from the chat
 
 Bling's refresh token expires after **30 days without a refresh**. When that

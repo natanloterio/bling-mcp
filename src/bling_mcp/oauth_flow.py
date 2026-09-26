@@ -103,6 +103,7 @@ class AuthorizationFlow:
                 self._http,
                 token_url=self._config.token_url,
                 redirect_uri=self.redirect_uri,
+                enable_jwt=self._config.enable_jwt,
             )
             self._tokens.install(payload)
         except AuthError as exc:

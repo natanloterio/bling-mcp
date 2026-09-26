@@ -20,7 +20,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-from .auth import AuthError
+from .auth import JWT_HEADER, AuthError
 from .config import DEFAULT_TOKEN_URL
 
 DEFAULT_AUTHORIZE_URL = "https://www.bling.com.br/Api/v3/oauth/authorize"
@@ -48,22 +48,24 @@ def exchange_code(
     *,
     token_url: str = DEFAULT_TOKEN_URL,
     redirect_uri: str | None = None,
+    enable_jwt: bool = False,
 ) -> dict[str, Any]:
     """Exchange an authorization code for the token set (incl. refresh_token).
 
     ``redirect_uri`` must be repeated here when it was sent in the authorize
     request (RFC 6749 §4.1.3); the CLI bootstrap never sends one.
+    ``enable_jwt`` adds Bling's ``enable-jwt: 1`` header so the issued tokens
+    are JWTs rather than the deprecated opaque ones.
     """
     basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
     data = {"grant_type": "authorization_code", "code": code}
     if redirect_uri:
         data["redirect_uri"] = redirect_uri
+    headers = {"Authorization": f"Basic {basic}", "Accept": "application/json"}
+    if enable_jwt:
+        headers = {**headers, **JWT_HEADER}
     try:
-        response = http_client.post(
-            token_url,
-            data=data,
-            headers={"Authorization": f"Basic {basic}", "Accept": "application/json"},
-        )
+        response = http_client.post(token_url, data=data, headers=headers)
     except httpx.HTTPError as exc:
         raise AuthError(f"Authorization code exchange failed: {exc}") from exc
 
@@ -97,6 +99,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="print only the refresh token (handy for scripts)",
     )
+    p_ex.add_argument(
+        "--opaque",
+        action="store_true",
+        help="request the deprecated opaque tokens instead of JWT",
+    )
 
     args = parser.parse_args(argv)
 
@@ -117,7 +124,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             "(set BLING_CLIENT_ID/BLING_CLIENT_SECRET or pass flags)"
         )
     with httpx.Client(timeout=30.0) as http:
-        payload = exchange_code(args.client_id, args.client_secret, args.code, http)
+        payload = exchange_code(
+            args.client_id, args.client_secret, args.code, http, enable_jwt=not args.opaque
+        )
     if args.refresh_only:
         print(payload.get("refresh_token", ""))
     else:

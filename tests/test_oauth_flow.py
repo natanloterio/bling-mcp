@@ -252,3 +252,11 @@ def test_exchange_sends_the_redirect_uri_it_authorized_with():
 
     body = parse_qs(reqs[0].content.decode())
     assert body["redirect_uri"] == ["http://localhost:8765/callback"]
+
+
+def test_exchange_requests_a_jwt_when_the_config_says_so():
+    flow, _, reqs = make_flow()
+
+    flow.complete(code="C", state="STATE-1")
+
+    assert reqs[0].headers["enable-jwt"] == "1"

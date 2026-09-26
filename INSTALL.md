@@ -20,6 +20,7 @@ with these environment variables set:
 | `BLING_TOKEN_STORE` | no | path to the token cache; default is the OS state dir (see below) |
 | `BLING_OAUTH_CALLBACK_PORT` | no | loopback port for in-chat re-authorization, default `8765`; must match the redirect URL registered in the Bling app |
 | `BLING_OAUTH_REDIRECT_HOST` | no | host written into the redirect URL, default `localhost`; use `127.0.0.1` if localhost resolves only to IPv6 |
+| `BLING_ENABLE_JWT` | no | default `1`: ask Bling for JWT tokens (`enable-jwt: 1`), per the opaque-token retirement; `0` keeps opaque tokens |
 
 ---
 
@@ -195,6 +196,16 @@ in Bling instead and set `BLING_OAUTH_REDIRECT_HOST=127.0.0.1`.
 
 `BLING_REFRESH_TOKEN` in the config can stay as it is: the cache records the
 re-authorized token under the same install, so restarts pick it up.
+
+## JWT migration
+
+Bling has deprecated opaque tokens (https://developer.bling.com.br/migracao-jwt);
+the blocking date is not yet announced. With the default `BLING_ENABLE_JWT=1`
+the server sends `enable-jwt: 1` on the code exchange, on every refresh and on
+every API request made with a JWT, which is all the migration requires. An
+existing opaque refresh token is expected to yield a JWT on its next refresh;
+if Bling instead demands a fresh grant, run `bling_authorize` once. The CLI
+bootstrap also requests JWTs (`--opaque` reverts).
 
 ## Verify it works
 

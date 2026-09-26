@@ -111,3 +111,11 @@ bootstrap + editing the MCP client config + restart.
 - [x] `server.build_runtime` shares one `TokenManager` between `BlingClient` and `ReauthService`
 - Review fixes: flow lock (PENDING→EXCHANGING claim, duplicate callbacks exchange once), non-ASCII `state` no longer crashes the handler, catch-all 500 page, exclusive port bind (Windows `SO_REUSEADDR`), `redirect_uri` echoed in the token request (RFC 6749 §4.1.3), RLock across `TokenManager` refresh/install
 - Setup: register `http://localhost:8765/callback` as the Bling app redirect URL.
+
+### Iteration — JWT migration ✅ (214 tests green, 96% coverage)
+Bling deprecated opaque tokens (blocking date "em definição"). The whole contract
+is one header, `enable-jwt: 1`, on the token endpoint and on API calls made with a JWT.
+- [x] `config.enable_jwt` from `BLING_ENABLE_JWT` (default on; 1/0, true/false, yes/no, on/off)
+- [x] `TokenManager._refresh` and `exchange_code(enable_jwt=...)` send the header; CLI `exchange` requests JWT unless `--opaque`
+- [x] `BlingClient` sends the header only when the bearer token `looks_like_jwt` (3 segments, JOSE prefix) — never on an opaque token, which the docs do not cover
+- Open: live confirmation that refreshing an opaque refresh token with the header yields a JWT; otherwise one `bling_authorize` does it.

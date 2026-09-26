@@ -207,3 +207,32 @@ def test_retry_applies_to_delete_too():
 
     assert client.delete("produtos/5") is None
     assert [r.method for r in reqs] == ["DELETE", "DELETE"]
+
+
+# --- JWT opt-in (Bling migração JWT) --------------------------------------------------
+JWT_LIKE = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl"
+
+
+def test_requests_carry_the_jwt_header_when_the_token_is_a_jwt():
+    http, reqs = build_client([{"json": {}}])
+    BlingClient(make_config(), FakeTokens(token=JWT_LIKE), http).get("produtos")
+
+    assert reqs[0].headers["enable-jwt"] == "1"
+    assert reqs[0].headers["Authorization"] == f"Bearer {JWT_LIKE}"
+
+
+def test_requests_omit_the_jwt_header_while_the_token_is_still_opaque():
+    """Mixed case the docs do not cover: never flag JWT handling for an opaque token."""
+    http, reqs = build_client([{"json": {}}])
+    BlingClient(make_config(), FakeTokens(token="a3f9c0d1e2b4"), http).get("produtos")
+
+    assert "enable-jwt" not in reqs[0].headers
+
+
+def test_retry_after_401_switches_the_header_with_the_refreshed_token():
+    http, reqs = build_client([{"status": 401, "json": {}}, {"json": {}}])
+    tokens = FakeTokens(token="opaque-old", refreshed=JWT_LIKE)
+    BlingClient(make_config(), tokens, http).get("produtos")
+
+    assert "enable-jwt" not in reqs[0].headers
+    assert reqs[1].headers["enable-jwt"] == "1"
